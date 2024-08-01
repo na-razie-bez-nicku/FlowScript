@@ -186,7 +186,7 @@ class Parser {
         return new FunctionLiteralExpression(parameters, body);
     }
 
-    private function parsePrintStatement():PrintStatement {
+    private function parsePrintStatement():Statement {
         consume(TokenType.LPAREN, "Expected '(' after 'print'");
         var expression:Expression = parseExpression();
         consume(TokenType.RPAREN, "Expected ')' after expression");
@@ -784,7 +784,7 @@ class Parser {
                 return new LiteralExpression(Std.parseInt(value));
             }
         } else if (match([TokenType.STRING])) {
-            return new LiteralExpression(previous().value);
+            return parseString();
         } else if (match([TokenType.IO])) {
             consume(TokenType.LPAREN, "Expected '('");
             consume(TokenType.RPAREN, "Expected ')'");
@@ -829,6 +829,48 @@ class Parser {
             Flow.error.report("Unexpected token: " + peek().value);
             return null;
         }
+    }
+
+    private function parseString(): Expression {
+        var value:String = previous().value;
+        var parts:Array<Expression> = [];
+        var currentPart:String = "";
+        var i:Int = 0;
+
+        while (i < value.length) {
+            var char:String = value.charAt(i);
+
+            if (char == '{') {
+                if (currentPart.length > 0) {
+                    parts.push(new LiteralExpression(currentPart));
+                    currentPart = "";
+                }
+
+                i++;
+                var varName:String = "";
+
+                while (i < value.length && value.charAt(i) != '}') {
+                    varName += value.charAt(i);
+                    i++;
+                }
+
+                if (i < value.length && value.charAt(i) == '}') {
+                    parts.push(new VariableExpression(varName));
+                }
+
+                currentPart = "";
+            } else {
+                currentPart += char;
+            }
+
+            i++;
+        }
+
+        if (currentPart.length > 0) {
+            parts.push(new LiteralExpression(currentPart));
+        }
+
+        return new ConcatenationExpression(parts);
     }
 
     private function parseIOExpression():Expression {

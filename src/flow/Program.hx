@@ -352,6 +352,28 @@ class BinaryExpression extends Expression {
     }
 }
 
+class ConcatenationExpression extends Expression {
+    public var parts:Array<Expression>;
+
+    public function new(parts:Array<Expression>) {
+        this.parts = parts;
+    }
+
+    public override function evaluate():Dynamic {
+        var result:String = "";
+        for (part in parts) {
+            var partValue:Dynamic = part.evaluate();
+            if (partValue == null) {
+                partValue = "null";
+            } else {
+                partValue = Std.string(partValue);
+            }
+            result += partValue;
+        }
+        return result;
+    }
+}
+
 class IfStatement extends Statement {
     public var condition:Expression;
     public var thenBranch:Statement;
@@ -760,17 +782,17 @@ class PropertyAccessExpression extends Expression {
 }
 
 class ArrayAccessExpression extends Expression {
-    public var array: Expression;
-    public var index: Expression;
+    public var array:Expression;
+    public var index:Expression;
 
-    public function new(array: Expression, index: Expression) {
+    public function new(array:Expression, index:Expression) {
         this.array = array;
         this.index = index;
     }
 
-    public override function evaluate(): Dynamic {
-        var arrayValue: Array<Dynamic> = array.evaluate();
-        var indexValue: Int = index.evaluate();
+    public override function evaluate():Dynamic {
+        var arrayValue:Array<Dynamic> = array.evaluate();
+        var indexValue:Int = index.evaluate();
 
         if (arrayValue == null) {
             Flow.error.report("Cannot access element of null array");
