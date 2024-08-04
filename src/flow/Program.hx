@@ -885,6 +885,36 @@ class DefaultClause {
     }
 }
 
+class ImportStatement extends Statement {
+    public var scriptFile:String;
+
+    public function new(scriptFile:String) {
+        this.scriptFile = scriptFile;
+    }
+
+    public override function execute():Void {
+        var scriptPath = getScriptPath();
+        if (!sys.FileSystem.exists(scriptPath)) {
+            Flow.error.report('Script file "$scriptPath" does not exist.');
+        }
+        var code = sys.io.File.getContent(scriptPath);
+        var tokens:Array<flow.Lexer.Token> = Lexer.tokenize(code);
+        var parser:Parser = new Parser(tokens);
+        var program:Program = parser.parse();
+        program.execute();
+    }
+
+    private function getScriptPath():String {
+        if (sys.FileSystem.exists("project.json")) {
+            var jsonData = sys.io.File.getContent("project.json");
+            var projectData:Dynamic = Json.parse(jsonData);
+            return projectData.src + "/" + scriptFile;
+        } else {
+            return scriptFile;
+        }
+    }
+}
+
 class ChrFunctionCall extends Expression {
     public var argument: Expression;
 
