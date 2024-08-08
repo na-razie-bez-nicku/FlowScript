@@ -51,6 +51,10 @@ class Parser {
                 return parseSwitchStatement();
             } else if (keyword == "import") {
                 return parseImportStatement();
+            } else if (keyword == "try") {
+                return parseTryStatement();
+            } else if (keyword == "error") {
+                return parseErrorStatement();
             } else {
                 Flow.error.report("Unknown keyword: " + keyword);
                 return null;
@@ -83,19 +87,16 @@ class Parser {
         var nameToken: Token = consume(TokenType.IDENTIFIER, "Expected variable name after 'let'");
         var name: String = nameToken.value;
 
-        consume(TokenType.EQUAL, "Expected '=' after variable name");
-
-        var initializer: Expression;
-
-        if (check(TokenType.LBRACKET)) {
-            initializer = parseArrayLiteral();
-        } else if (check(TokenType.LBRACE)) {
-            initializer = parseObjectLiteral();
+        var opera: String = "";
+        if (match([TokenType.EQUAL, TokenType.PLUS_EQUAL, TokenType.MINUS_EQUAL])) {
+            opera = previous().value;
         } else {
-            initializer = parseExpression();
+            Flow.error.report("Expected '=', '+=', or '-=' after variable name");
+            return null;
         }
 
-        return new LetStatement(name, initializer);
+        var initializer: Expression = parseExpression();
+        return new LetStatement(name, opera, initializer);
     }
 
     private function parseArrayLiteral():Expression {
@@ -148,6 +149,8 @@ class Parser {
                     Flow.error.report("Unexpected keyword: " + keyword);
                     return null;
                 }
+            } else if (firstTokenType == TokenType.LBRACE) {
+                value = parseObjectLiteral();
             } else if (check(TokenType.LBRACKET)) {
                 value = parseArrayLiteral();
             } else {
@@ -173,18 +176,23 @@ class Parser {
     }
 
     private function parseFunctionLiteral():Expression {
-        var parameters:Array<String> = [];
+        var parameters:Array<Parameter> = [];
         consume(TokenType.LPAREN, "Expected '(' after function keyword");
-
         while (!check(TokenType.RPAREN)) {
             var parameterToken:Token = consume(TokenType.IDENTIFIER, "Expected parameter name");
-            parameters.push(parameterToken.value);
-    
+            var parameterName:String = parameterToken.value;
+            var defaultValue:Expression = null;
+
+            if (match([TokenType.EQUAL])) {
+                defaultValue = parseExpression();
+            }
+
+            parameters.push(new Parameter(parameterName, defaultValue));
+
             if (match([TokenType.COMMA])) {
                 // Consume comma
             }
         }
-
         consume(TokenType.RPAREN, "Expected ')' after parameters");
 
         var body:BlockStatement = parseBlock();
@@ -207,6 +215,13 @@ class Parser {
         var expression:Expression = parseExpression();
         consume(TokenType.RPAREN, "Expected ')' after expression");
         return new PrintStatement(expression);
+    }
+
+    private function parseErrorStatement():Statement {
+        consume(TokenType.LPAREN, "Expected '(' after 'error'");
+        var expression:Expression = parseExpression();
+        consume(TokenType.RPAREN, "Expected ')' after expression");
+        return new ErrorStatement(expression);
     }
 
     private function parseIfStatement():Statement {
@@ -262,24 +277,31 @@ class Parser {
         return new ForStatement(variableName, iterableExpression, body);
     }
 
-    private function parseFuncStatement():FuncStatement {
+    private function parseFuncStatement():Statement {
         var nameToken:Token = consume(TokenType.IDENTIFIER, "Expected function name after 'func'");
         var name:String = nameToken.value;
-
+    
         consume(TokenType.LPAREN, "Expected '(' after function name");
-
-        var parameters:Array<String> = [];
+    
+        var parameters:Array<Parameter> = [];
         while (!check(TokenType.RPAREN)) {
             var parameterToken:Token = consume(TokenType.IDENTIFIER, "Expected parameter name");
-            parameters.push(parameterToken.value);
+            var parameterName:String = parameterToken.value;
+            var defaultValue:Expression = null;
+    
+            if (match([TokenType.EQUAL])) {
+                defaultValue = parseExpression();
+            }
+    
+            parameters.push(new Parameter(parameterName, defaultValue));
+    
             if (match([TokenType.COMMA])) {
                 // Consume comma
             }
         }
         consume(TokenType.RPAREN, "Expected ')' after parameters");
-
+    
         var body:BlockStatement = parseBlock();
-
         return new FuncStatement(name, parameters, body);
     }
 
@@ -295,6 +317,8 @@ class Parser {
             return parseSetStatement();
         } else if (name == "get") {
             return parseGetStatement();
+        } else if (name == "sort") {
+            return parseSortStatement();
         }        
         var isMethodCall: Bool = name.indexOf(".") > -1;
         if (isMethodCall) {
@@ -376,6 +400,25 @@ class Parser {
         return new ImportStatement(scriptFile.value);
     }
 
+    private function parseTryStatement(): Statement {
+        var tryBlock: BlockStatement = parseBlock();
+
+        var catchClauses: Array<CatchClause> = [];
+        while (match([TokenType.KEYWORD]) && previous().value == "catch") {
+            var catchClause: CatchClause = parseCatchClause();
+            catchClauses.push(catchClause);
+        }
+
+        return new TryStatement(tryBlock, catchClauses);
+    }
+
+    private function parseCatchClause(): CatchClause {
+        var variableToken: Token = consume(TokenType.IDENTIFIER, "Expected variable name");
+        var variableName: String = variableToken.value;
+        var catchBlock: BlockStatement = parseBlock();
+        return new CatchClause(variableName, catchBlock);
+    }
+
     private function parsePushStatement(): Statement {
         consume(TokenType.LPAREN, "Expected '(' after 'push'");
         var array: Expression = parseExpression();
@@ -413,6 +456,13 @@ class Parser {
         var keyExpr: Expression = parseExpression();
         consume(TokenType.RPAREN, "Expected ')' after key expression in 'get'");
         return new GetStatement(targetExpr, keyExpr);
+    }
+
+    private function parseSortStatement(): Statement {
+        consume(TokenType.LPAREN, "Expected '(' after 'sort'");
+        var arrayExpr: Expression = parseExpression();
+        consume(TokenType.RPAREN, "Expected ')' after array argument in 'sort'");
+        return new SortStatement(arrayExpr);
     }
 
     private function parseIOStatement():Statement {
@@ -742,6 +792,10 @@ class Parser {
             if (keyword == "func") {
                 return parseFunctionLiteral();
             }
+        } else if (firstTokenType == TokenType.LBRACKET) {
+            return parseArrayLiteral();
+        } else if (firstTokenType == TokenType.LBRACE) {
+            return parseObjectLiteral();
         }
         return parseLogicalOr();
     }
@@ -764,7 +818,7 @@ class Parser {
             expr = new BinaryExpression(expr, opera, right);
         }
         return expr;
-    }    
+    }
 
     private function parseEquality():Expression {
         var expr = parseComparison();
@@ -785,7 +839,7 @@ class Parser {
         }
         return expr;
     }
-    
+
     private function parseTerm(): Expression {
         var expr: Expression = parseFactor();
         while (match([TokenType.PLUS, TokenType.MINUS, TokenType.MULTIPLY, TokenType.DIVIDE, TokenType.MODULO])) {
@@ -797,7 +851,9 @@ class Parser {
     }
 
     private function parseFactor():Expression {
-        if (match([TokenType.NUMBER])) {
+        if (match([TokenType.NOT])) {
+            return parseLogicalNot();
+        } else if (match([TokenType.NUMBER])) {
             var value:String = previous().value;
             if (value.indexOf(".") != -1) {
                 return new LiteralExpression(Std.parseFloat(value));
@@ -892,6 +948,11 @@ class Parser {
         }
 
         return new ConcatenationExpression(parts);
+    }
+
+    private function parseLogicalNot():Expression {
+        var expr = parseLogicalAnd();
+        return new UnaryExpression("not", expr);
     }
 
     private function parseIOExpression():Expression {
@@ -1263,7 +1324,12 @@ class Parser {
             consume(TokenType.COMMA, "Expected ',' after target expression in 'get'");
             var keyExpr: Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after key expression in 'get'");
-            return new GetFunctionCall(targetExpr, keyExpr);        
+            return new GetFunctionCall(targetExpr, keyExpr);
+        } else if (name == "sort") {
+            consume(TokenType.LPAREN, "Expected '(' after 'sort'");
+            var arrayExpr: Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after array argument in 'sort'");
+            return new SortFunctionCall(arrayExpr);
         }
 
         var isMethodCall: Bool = name.indexOf(".") > -1;

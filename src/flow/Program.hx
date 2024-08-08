@@ -39,17 +39,64 @@ class PrintStatement extends Statement {
     }
 }
 
-class LetStatement extends Statement {
-    public var name:String;
-    public var initializer:Expression;
+class ErrorStatement extends Statement {
+    public var expression:Expression;
 
-    public function new(name:String, initializer:Expression) {
-        this.name = name;
-        this.initializer = initializer;
+    public function new(expression:Expression) {
+        this.expression = expression;
     }
 
     public override function execute():Void {
-        Environment.define(name, initializer.evaluate());
+        var value:String = expression.evaluate();
+        var lines:Array<String> = value.split("\n");
+        for (line in lines) {
+            Flow.error.report(line);
+        }
+    }
+}
+
+class LetStatement extends Statement {
+    public var name: String;
+    public var opera: String;
+    public var initializer: Expression;
+
+    public function new(name: String, opera: String, initializer: Expression) {
+        this.name = name;
+        this.opera = opera;
+        this.initializer = initializer;
+    }
+
+    public override function execute(): Void {
+        var value: Dynamic = initializer.evaluate();
+
+        switch (opera) {
+            case "=":
+                Environment.define(name, value);
+            case "+=":
+                var existingValue: Dynamic = Environment.get(name);
+                if (Std.is(existingValue, Int) || Std.is(existingValue, Float)) {
+                    var existingFloat: Float = cast(existingValue, Float);
+                    var newValue: Float = existingFloat + cast(value, Float);
+                    Environment.define(name, newValue);
+                } else if (existingValue == null) {
+                    Environment.define(name, cast(value, Float));
+                } else {
+                    Flow.error.report("Variable '" + name + "' is not a number for '+=' operation");
+                }
+            case "-=":
+                var existingValue: Dynamic = Environment.get(name);
+                if (Std.is(existingValue, Int) || Std.is(existingValue, Float)) {
+                    var existingFloat: Float = cast(existingValue, Float);
+                    var newValue: Float = existingFloat - cast(value, Float);
+                    Environment.define(name, newValue);
+                } else if (existingValue == null) {
+                    Environment.define(name, -cast(value, Float));
+                } else {
+                    Flow.error.report("Variable '" + name + "' is not a number for '-=' operation");
+                }
+            default:
+                Flow.error.report("Unsupported assignment operator: " + opera);
+        }
     }
 }
 
@@ -246,11 +293,11 @@ class BinaryExpression extends Expression {
         var leftIsString = Std.is(leftValue, String);
         var rightIsString = Std.is(rightValue, String);
 
-        if (!leftIsFloat && !leftIsString) {
+        if (!leftIsFloat &&!leftIsString) {
             Flow.error.report("Unsupported left operand type for operator: " + opera);
             return null;
         }
-        if (!rightIsFloat && !rightIsString) {
+        if (!rightIsFloat &&!rightIsString) {
             Flow.error.report("Unsupported right operand type for operator: " + opera);
             return null;
         }
@@ -302,7 +349,7 @@ class BinaryExpression extends Expression {
             case "==":
                 return leftValue == rightValue;
             case "!=":
-                return leftValue != rightValue;
+                return leftValue!= rightValue;
             case "<":
                 if (leftIsString || rightIsString) {
                     Flow.error.report("Unsupported operator for strings: " + opera);
@@ -336,14 +383,14 @@ class BinaryExpression extends Expression {
                     Flow.error.report("Unsupported operator 'and' for strings");
                     return null;
                 } else {
-                    return (leftValue != 0) && (rightValue != 0);
+                    return (leftValue!= 0) && (rightValue!= 0);
                 }
             case "or":
                 if (leftIsString || rightIsString) {
                     Flow.error.report("Unsupported operator 'or' for strings");
                     return null;
                 } else {
-                    return (leftValue != 0) || (rightValue != 0);
+                    return (leftValue!= 0) || (rightValue!= 0);
                 }
             default:
                 Flow.error.report("Unknown operator: " + opera);
@@ -536,10 +583,10 @@ class ArrayLiteralExpression extends Expression {
 
 class FuncStatement extends Statement {
     public var name:String;
-    public var parameters:Array<String>;
+    public var parameters:Array<Parameter>;
     public var body:BlockStatement;
 
-    public function new(name:String, parameters:Array<String>, body:BlockStatement) {
+    public function new(name:String, parameters:Array<Parameter>, body:BlockStatement) {
         this.name = name;
         this.parameters = parameters;
         this.body = body;
@@ -576,10 +623,10 @@ class CallStatement extends Statement {
 
 class Function {
     public var name:String;
-    public var parameters:Array<String>;
+    public var parameters:Array<Parameter>;
     public var body:BlockStatement;
 
-    public function new(name:String, parameters:Array<String>, body:BlockStatement) {
+    public function new(name:String, parameters:Array<Parameter>, body:BlockStatement) {
         this.name = name;
         this.parameters = parameters;
         this.body = body;
@@ -588,7 +635,14 @@ class Function {
     public function execute(args:Array<Dynamic>):Dynamic {
         var oldValues:Map<String, Dynamic> = Environment.values.copy();
         for (i in 0...parameters.length) {
-            Environment.define(parameters[i], args[i]);
+            if (i < args.length) {
+                Environment.define(parameters[i].name, args[i]);
+            } else if (parameters[i].defaultValue != null) {
+                Environment.define(parameters[i].name, parameters[i].defaultValue.evaluate());
+            } else {
+                Flow.error.report("Missing argument for parameter '" + parameters[i].name + "'");
+                return null;
+            }
         }
 
         try {
@@ -632,10 +686,10 @@ class CallExpression extends Expression {
 }
 
 class FunctionLiteralExpression extends Expression {
-    public var parameters:Array<String>;
+    public var parameters:Array<Parameter>;
     public var body:BlockStatement;
 
-    public function new(parameters:Array<String>, body:BlockStatement) {
+    public function new(parameters:Array<Parameter>, body:BlockStatement) {
         this.parameters = parameters;
         this.body = body;
     }
@@ -711,6 +765,16 @@ class MethodCallStatement extends Statement {
             args.push(arg.evaluate());
         }
         func.execute(args);
+    }
+}
+
+class Parameter {
+    public var name:String;
+    public var defaultValue:Expression;
+
+    public function new(name:String, defaultValue:Expression = null) {
+        this.name = name;
+        this.defaultValue = defaultValue;
     }
 }
 
@@ -837,6 +901,32 @@ class ArrayAssignmentStatement extends Statement {
     }
 }
 
+class UnaryExpression extends Expression {
+    public var opera:String;
+    public var right:Expression;
+
+    public function new(opera:String, right:Expression) {
+        this.opera = opera;
+        this.right = right;
+    }
+
+    public override function evaluate():Dynamic {
+        var value = right.evaluate();
+        switch (opera) {
+            case "not":
+                if (Std.is(value, Bool)) {
+                    return !cast(value);
+                } else {
+                    Flow.error.report("Logical 'not' operator can only be applied to boolean values.");
+                    return null;
+                }
+            default:
+                Flow.error.report("Unknown unary operator: " + opera);
+                return null;
+        }
+    }
+}
+
 class BreakStatement extends Statement {
     public function new() {}
 
@@ -941,6 +1031,41 @@ class ImportStatement extends Statement {
         } else {
             return scriptFile;
         }
+    }
+}
+
+class TryStatement extends Statement {
+    public var tryBlock: BlockStatement;
+    public var catchClauses: Array<CatchClause>;
+
+    public function new(tryBlock: BlockStatement, catchClauses: Array<CatchClause>) {
+        this.tryBlock = tryBlock;
+        this.catchClauses = catchClauses;
+    }
+
+    public override function execute():Void {
+        try {
+            tryBlock.execute();
+        } catch (e:Dynamic) {
+            for (catchClause in catchClauses) {
+                if (catchClause.variableName == null || catchClause.variableName == "") {
+                    catchClause.catchBlock.execute();
+                } else {
+                    Environment.define(catchClause.variableName, e);
+                    catchClause.catchBlock.execute();
+                }
+            }
+        }
+    }
+}
+
+class CatchClause {
+    public var variableName: String;
+    public var catchBlock: BlockStatement;
+
+    public function new(variableName: String, catchBlock: BlockStatement) {
+        this.variableName = variableName;
+        this.catchBlock = catchBlock;
     }
 }
 
@@ -1307,7 +1432,8 @@ class ConcatFunctionCall extends Expression {
                 var secondArr = cast(secondValue, Array<Dynamic>);
                 return firstArr.concat(secondArr);
             default:
-                throw "Concat can only be applied to strings or arrays.";
+                Flow.error.report("Concat can only be applied to strings or arrays.");
+                return null;
         }
     }
 }
@@ -1335,7 +1461,8 @@ class IndexOfFunctionCall extends Expression {
                 var searchItem = searchValue;
                 return arr.indexOf(searchItem);
             default:
-                throw "IndexOf can only be applied to strings or arrays.";
+                Flow.error.report("IndexOf can only be applied to strings or arrays.");
+                return null;
         }
     }
 }
@@ -1389,7 +1516,8 @@ class StartsWithFunctionCall extends Expression {
                 var arr = cast(strOrArrValue, Array<Dynamic>);
                 return arr.length > 0 && arr[0] == searchValue;
             default:
-                throw "StartsWith can only be applied to strings or arrays.";
+                Flow.error.report("StartsWith can only be applied to strings or arrays.");
+                return null;
         }
     }
 }
@@ -1416,7 +1544,8 @@ class EndsWithFunctionCall extends Expression {
                 var arr = cast(strOrArrValue, Array<Dynamic>);
                 return arr.length > 0 && arr[arr.length - 1] == searchValue;
             default:
-                throw "EndsWith can only be applied to strings or arrays.";
+                Flow.error.report("EndsWith can only be applied to strings or arrays.");
+                return null;
         }
     }
 }
@@ -1448,7 +1577,8 @@ class SliceFunctionCall extends Expression {
                 var arr = cast(strOrArrValue, Array<Dynamic>);
                 return arr.slice(start, end);
             default:
-                throw "Slice can only be applied to strings or arrays.";
+                Flow.error.report("Slice can only be applied to strings or arrays.");
+                return null;
         }
     }
 }
@@ -1490,7 +1620,8 @@ class SetFunctionCall extends Expression {
                 Reflect.setField(targetValue, cast(keyValue, String), valueValue);
                 return valueValue;
             default:
-                throw "Set can only be applied to arrays or objects.";
+                Flow.error.report("Set can only be applied to arrays or objects.");
+                return null;
         }
     }
 }
@@ -1526,7 +1657,8 @@ class GetFunctionCall extends Expression {
             case TObject:
                 return Reflect.field(targetValue, cast(keyValue, String));
             default:
-                throw "Get can only be applied to arrays or objects.";
+                Flow.error.report("Get can only be applied to arrays or objects.");
+                return null;
         }
     }
 }
@@ -1570,7 +1702,7 @@ class SetStatement extends Statement {
             case TObject:
                 Reflect.setField(targetValue, cast(keyValue, String), valueValue);
             default:
-                throw "Set can only be applied to arrays or objects.";
+                Flow.error.report("Set can only be applied to arrays or objects.");
         }
     }
 }
@@ -1612,7 +1744,75 @@ class GetStatement extends Statement {
             case TObject:
                 result = Reflect.field(targetValue, cast(keyValue, String));
             default:
-                throw "Get can only be applied to arrays or objects.";
+                Flow.error.report("Get can only be applied to arrays or objects.");
+        }
+    }
+}
+
+class SortFunctionCall extends Expression {
+    public var arrayExpr: Expression;
+
+    public function new(arrayExpr: Expression) {
+        this.arrayExpr = arrayExpr;
+    }
+
+    public override function evaluate(): Dynamic {
+        var arrayValue = arrayExpr.evaluate();
+        if (Std.is(arrayValue, Array)) {
+            var array = cast(arrayValue, Array<Dynamic>);
+            array.sort(function(a: Dynamic, b: Dynamic): Int {
+                if (Std.is(a, String) && Std.is(b, String)) {
+                    return (a < b ? -1 : (a > b ? 1 : 0));
+                } else if (Std.is(a, Int) && Std.is(b, Int)) {
+                    return cast(a, Int) - cast(b, Int);
+                } else if (Std.is(a, Float) && Std.is(b, Float)) {
+                    return std.Math.floor(cast(a, Float) - cast(b, Float));
+                } else if (Std.is(a, Float) && Std.is(b, Int)) {
+                    return std.Math.floor(cast(a, Float) - cast(b, Int));
+                } else if (Std.is(a, Int) && Std.is(b, Float)) {
+                    return std.Math.floor(cast(a, Int) - cast(b, Float));
+                } else {
+                    Flow.error.report("Array contains mixed or unsupported types");
+                    return 0;
+                }
+            });
+            return array;
+        } else {
+            Flow.error.report("Sort function expects an array");
+            return null;
+        }
+    }
+}
+
+class SortStatement extends Statement {
+    public var arrayExpr: Expression;
+
+    public function new(arrayExpr: Expression) {
+        this.arrayExpr = arrayExpr;
+    }
+
+    public override function execute():Void {
+        var arrayValue = arrayExpr.evaluate();
+        if (Std.is(arrayValue, Array)) {
+            var array = cast(arrayValue, Array<Dynamic>);
+            array.sort(function(a: Dynamic, b: Dynamic): Int {
+                if (Std.is(a, String) && Std.is(b, String)) {
+                    return (a < b ? -1 : (a > b ? 1 : 0));
+                } else if (Std.is(a, Int) && Std.is(b, Int)) {
+                    return cast(a, Int) - cast(b, Int);
+                } else if (Std.is(a, Float) && Std.is(b, Float)) {
+                    return std.Math.floor(cast(a, Float) - cast(b, Float));
+                } else if (Std.is(a, Float) && Std.is(b, Int)) {
+                    return std.Math.floor(cast(a, Float) - cast(b, Int));
+                } else if (Std.is(a, Int) && Std.is(b, Float)) {
+                    return std.Math.floor(cast(a, Int) - cast(b, Float));
+                } else {
+                    Flow.error.report("Array contains mixed or unsupported types");
+                    return 0;
+                }
+            });
+        } else {
+            Flow.error.report("Sort function expects an array");
         }
     }
 }
@@ -1961,10 +2161,11 @@ class MathExpression extends Expression {
             case "atan":
                 if (evaluatedArguments.length == 1) return Math.atan(evaluatedArguments[0]);
             default:
-                throw "Unknown method: " + methodName;
+                Flow.error.report("Unknown method: " + methodName);
         }
 
-        throw "Invalid arguments for method: " + methodName;
+        Flow.error.report("Invalid arguments for method: " + methodName);
+        return null;
     }
 }
 
@@ -2009,7 +2210,7 @@ class MathStatement extends Statement {
             case "atan":
                 if (evaluatedArguments.length == 1) Math.atan(evaluatedArguments[0]);
             default:
-                throw "Unknown method: " + methodName;
+                Flow.error.report("Unknown method: " + methodName);
         }
     }
 }
