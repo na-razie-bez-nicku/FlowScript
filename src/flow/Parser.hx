@@ -55,8 +55,16 @@ class Parser {
                 return parseTryStatement();
             } else if (keyword == "error") {
                 return parseErrorStatement();
+            } else if (keyword == "enum") {
+                return parseEnumStatement();
+            } else if (keyword == "class") {
+                return parseClassStatement();
+            } else if (keyword == "new") {
+                return parseNewStatement();
+            } else if (keyword == "do") {
+                return parseDoWhileStatement();
             } else {
-                Flow.error.report("Unknown keyword: " + keyword);
+                Flow.error.report("Unknown keyword: " + keyword, peek().lineNumber);
                 return null;
             }
         } else if (firstTokenType == TokenType.IO) {
@@ -71,14 +79,21 @@ class Parser {
             return parseJsonStatement();
         } else if (firstTokenType == TokenType.MATH) {
             return parseMathStatement();
+        } else if (firstTokenType == TokenType.THIS) {
+            return parseThisStatement();
         } else if (firstTokenType == TokenType.IDENTIFIER) {
             if (peekNext().type == TokenType.LBRACKET) {
                 return parseArrayAssignment();
             } else {
                 return parseLetStatement();
             }
+        } else if (firstTokenType == TokenType.PLUS_PLUS || firstTokenType == TokenType.MINUS_MINUS) {
+            var opera: String = advance().value;
+            var nameToken: Token = consume(TokenType.IDENTIFIER, "Expected variable name after '" + opera + "'");
+            var name: String = nameToken.value;
+            return new LetStatement(name, opera, null, true);
         } else {
-            Flow.error.report("Unexpected token: " + peek().value);
+            Flow.error.report("Unexpected token: " + peek().value, peek().lineNumber);
             return null;
         }
     }
@@ -88,14 +103,15 @@ class Parser {
         var name: String = nameToken.value;
 
         var opera: String = "";
-        if (match([TokenType.EQUAL, TokenType.PLUS_EQUAL, TokenType.MINUS_EQUAL])) {
+
+        if (match([TokenType.EQUAL, TokenType.PLUS_EQUAL, TokenType.MINUS_EQUAL, TokenType.PLUS_PLUS, TokenType.MINUS_MINUS])) {
             opera = previous().value;
         } else {
-            Flow.error.report("Expected '=', '+=', or '-=' after variable name");
+            Flow.error.report("Expected '=', '+=', '-=', '++', or '--' after variable name", peek().lineNumber);
             return null;
         }
 
-        var initializer: Expression = parseExpression();
+        var initializer: Expression = (opera == "++" || opera == "--") ? null : parseExpression();
         return new LetStatement(name, opera, initializer);
     }
 
@@ -146,7 +162,7 @@ class Parser {
                 if (keyword == "func") {
                     value = parseFunctionLiteral();
                 } else {
-                    Flow.error.report("Unexpected keyword: " + keyword);
+                    Flow.error.report("Unexpected keyword: " + keyword, peek().lineNumber);
                     return null;
                 }
             } else if (firstTokenType == TokenType.LBRACE) {
@@ -158,7 +174,7 @@ class Parser {
             }
     
             if (value == null) {
-                Flow.error.report("Failed to parse value for property: " + key.value);
+                Flow.error.report("Failed to parse value for property: " + key.value, peek().lineNumber);
                 return null;
             }
     
@@ -198,6 +214,11 @@ class Parser {
         var body:BlockStatement = parseBlock();
 
         return new FunctionLiteralExpression(parameters, body);
+    }
+
+    function parseThisStatement():ThisStatement {
+        var expression = parseExpression();
+        return new ThisStatement(expression);
     }
 
     private function parseArrayAssignment():Statement {
@@ -385,7 +406,7 @@ class Parser {
                 var defaultBody = parseBlock();
                 defaultClause = new DefaultClause(defaultBody);
             } else {
-                Flow.error.report("Expected 'case' or 'default' in switch statement.");
+                Flow.error.report("Expected 'case' or 'default' in switch statement.", peek().lineNumber);
                 break;
             }
         }
@@ -417,6 +438,100 @@ class Parser {
         var variableName: String = variableToken.value;
         var catchBlock: BlockStatement = parseBlock();
         return new CatchClause(variableName, catchBlock);
+    }
+
+    private function parseEnumStatement():Statement {
+        var name = consume(TokenType.IDENTIFIER, "Expected enum name.").value;
+
+        var values:Array<EnumValue> = [];
+    
+        if (match([TokenType.LBRACE])) {
+            while (!check(TokenType.RBRACE) && !isAtEnd()) {
+                var valueName = consume(TokenType.IDENTIFIER, "Expected enum value name.").value;
+                var value = null;
+    
+                if (match([TokenType.EQUAL])) {
+                    value = parseExpression();
+                }
+    
+                values.push(new EnumValue(valueName, value));
+    
+                if (!match([TokenType.COMMA])) {
+                    break;
+                }
+            }
+    
+            consume(TokenType.RBRACE, "Expected '}' after enum values.");
+        }
+    
+        return new EnumStatement(name, values);
+    }
+
+    private function parseClassStatement(): Statement {
+        var nameToken: Token = consume(TokenType.IDENTIFIER, "Expected class name after 'class'");
+        var name: String = nameToken.value;
+    
+        var properties: Array<Statement> = [];
+        var methods: Array<Statement> = [];
+        var constructor: Statement = null;
+    
+        consume(TokenType.LBRACE, "Expected '{' after class name");
+    
+        while (!check(TokenType.RBRACE) && !isAtEnd()) {
+            if (match([TokenType.KEYWORD])) {
+                var keyword: String = previous().value;
+                if (keyword == "let") {
+                    properties.push(parseLetStatement());
+                } else if (keyword == "func") {
+                    var funcStatement: Statement = parseFuncStatement();
+                    if (cast(funcStatement, FuncStatement).name == "constructor") {
+                        constructor = funcStatement;
+                    } else {
+                        methods.push(funcStatement);
+                    }
+                } else {
+                    Flow.error.report("Unexpected keyword in class: " + keyword);
+                }
+            } else {
+                Flow.error.report("Unexpected token in class: " + peek().value);
+            }
+        }
+    
+        consume(TokenType.RBRACE, "Expected '}' after class body");
+    
+        return new ClassStatement(name, properties, methods, constructor);
+    }
+
+    private function parseNewStatement():Statement {
+        var classNameToken:Token = consume(TokenType.IDENTIFIER, "Expected class name after 'new'");
+        var className:String = classNameToken.value;
+    
+        consume(TokenType.LPAREN, "Expected '(' after class name");
+        var arguments:Array<Expression> = [];
+        while (!check(TokenType.RPAREN)) {
+            arguments.push(parseExpression());
+            if (match([TokenType.COMMA])) {
+                // Consume comma
+            }
+        }
+        consume(TokenType.RPAREN, "Expected ')' after arguments");
+    
+        return new NewStatement(className, arguments);
+    }
+
+    private function parseDoWhileStatement():Statement {
+        var body:Statement = parseBlock();
+    
+        consume(TokenType.KEYWORD, "Expected 'while' after 'do' block");
+        var whileKeyword:String = previous().value;
+
+        if (whileKeyword != "while") {
+            Flow.error.report("Expected 'while' after 'do' block");
+            return null;
+        }
+
+        var condition:Expression = parseExpression();
+        return new DoWhileStatement(condition, body);
     }
 
     private function parsePushStatement(): Statement {
@@ -468,17 +583,17 @@ class Parser {
     private function parseIOStatement():Statement {
         var ioToken:Token = advance();
         if (ioToken.type != TokenType.IO) {
-            Flow.error.report("Expected 'IO' keyword");
+            Flow.error.report("Expected 'IO' keyword", peek().lineNumber);
             return null;
         }
         var lparenToken:Token = advance();
         if (lparenToken.type != TokenType.LPAREN) {
-            Flow.error.report("Expected '('");
+            Flow.error.report("Expected '('", peek().lineNumber);
             return null;
         }
         var rparenToken:Token = advance();
         if (rparenToken.type != TokenType.RPAREN) {
-            Flow.error.report("Expected ')'");
+            Flow.error.report("Expected ')'", peek().lineNumber);
             return null;
         }
         var methodNameToken:Token = advance();
@@ -504,7 +619,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new IOStatement("writeByte", [expression]);
         } else {
-            Flow.error.report("Unknown IO method: " + methodName);
+            Flow.error.report("Unknown IO method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -512,19 +627,19 @@ class Parser {
     private function parseRandomStatement():Statement {
         var randomToken:Token = advance();
         if (randomToken.type != TokenType.RANDOM) {
-            Flow.error.report("Expected 'Random' keyword");
+            Flow.error.report("Expected 'Random' keyword", peek().lineNumber);
             return null;
         }
 
         var lparenToken:Token = advance();
         if (lparenToken.type != TokenType.LPAREN) {
-            Flow.error.report("Expected '('");
+            Flow.error.report("Expected '('", peek().lineNumber);
             return null;
         }
 
         var rparenToken:Token = advance();
         if (rparenToken.type != TokenType.RPAREN) {
-            Flow.error.report("Expected ')'");
+            Flow.error.report("Expected ')'", peek().lineNumber);
             return null;
         }
 
@@ -534,27 +649,27 @@ class Parser {
         if (methodName == ".nextInt") {
             var lparenToken:Token = advance();
             if (lparenToken.type != TokenType.LPAREN) {
-                Flow.error.report("Expected '(' after 'nextInt'");
+                Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
                 return null;
             }
 
             var minExpr:Expression = parseExpression();
             var commaToken:Token = advance();
             if (commaToken.type != TokenType.COMMA) {
-                Flow.error.report("Expected ',' after min value");
+                Flow.error.report("Expected ',' after min value", peek().lineNumber);
                 return null;
             }
 
             var maxExpr:Expression = parseExpression();
             var rparenToken:Token = advance();
             if (rparenToken.type != TokenType.RPAREN) {
-                Flow.error.report("Expected ')' after max value");
+                Flow.error.report("Expected ')' after max value", peek().lineNumber);
                 return null;
             }
 
             return new RandomStatement(methodName, [minExpr, maxExpr]);
         } else {
-            Flow.error.report("Unknown Random method: " + methodName);
+            Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -562,19 +677,19 @@ class Parser {
     private function parseSystemStatement():Statement {
         var systemToken:Token = advance();
         if (systemToken.type != TokenType.SYSTEM) {
-            Flow.error.report("Expected 'System' keyword");
+            Flow.error.report("Expected 'System' keyword", peek().lineNumber);
             return null;
         }
 
         var lparenToken:Token = advance();
         if (lparenToken.type != TokenType.LPAREN) {
-            Flow.error.report("Expected '('");
+            Flow.error.report("Expected '('", peek().lineNumber);
             return null;
         }
 
         var rparenToken:Token = advance();
         if (rparenToken.type != TokenType.RPAREN) {
-            Flow.error.report("Expected ')'");
+            Flow.error.report("Expected ')'", peek().lineNumber);
             return null;
         }
 
@@ -614,7 +729,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new SystemStatement("openUrl", [expression]);
         } else {
-            Flow.error.report("Unknown System method: " + methodName);
+            Flow.error.report("Unknown System method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -622,19 +737,19 @@ class Parser {
     private function parseFileStatement():Statement {
         var fileToken:Token = advance();
         if (fileToken.type != TokenType.FILE) {
-            Flow.error.report("Expected 'File' keyword");
+            Flow.error.report("Expected 'File' keyword", peek().lineNumber);
             return null;
         }
 
         var lparenToken:Token = advance();
         if (lparenToken.type != TokenType.LPAREN) {
-            Flow.error.report("Expected '('");
+            Flow.error.report("Expected '('", peek().lineNumber);
             return null;
         }
 
         var rparenToken:Token = advance();
         if (rparenToken.type != TokenType.RPAREN) {
-            Flow.error.report("Expected ')'");
+            Flow.error.report("Expected ')'", peek().lineNumber);
             return null;
         }
 
@@ -659,7 +774,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after file path expression");
             return new FileStatement("exists", [filePath]);
         } else {
-            Flow.error.report("Unknown File method: " + methodName);
+            Flow.error.report("Unknown File method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -667,19 +782,19 @@ class Parser {
     private function parseJsonStatement():Statement {
         var jsonToken:Token = advance();
         if (jsonToken.type != TokenType.JSON) {
-            Flow.error.report("Expected 'Json' keyword");
+            Flow.error.report("Expected 'Json' keyword", peek().lineNumber);
             return null;
         }
 
         var lparenToken:Token = advance();
         if (lparenToken.type != TokenType.LPAREN) {
-            Flow.error.report("Expected '('");
+            Flow.error.report("Expected '('", peek().lineNumber);
             return null;
         }
 
         var rparenToken:Token = advance();
         if (rparenToken.type != TokenType.RPAREN) {
-            Flow.error.report("Expected ')'");
+            Flow.error.report("Expected ')'", peek().lineNumber);
             return null;
         }
 
@@ -702,7 +817,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new JsonStatement("isValid", [expression]);
         } else {
-            Flow.error.report("Unknown Json method: " + methodName);
+            Flow.error.report("Unknown Json method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -710,17 +825,17 @@ class Parser {
     private function parseMathStatement():Statement {
         var ioToken:Token = advance();
         if (ioToken.type != TokenType.MATH) {
-            Flow.error.report("Expected 'Math' keyword");
+            Flow.error.report("Expected 'Math' keyword", peek().lineNumber);
             return null;
         }
         var lparenToken:Token = advance();
         if (lparenToken.type != TokenType.LPAREN) {
-            Flow.error.report("Expected '('");
+            Flow.error.report("Expected '('", peek().lineNumber);
             return null;
         }
         var rparenToken:Token = advance();
         if (rparenToken.type != TokenType.RPAREN) {
-            Flow.error.report("Expected ')'");
+            Flow.error.report("Expected ')'", peek().lineNumber);
             return null;
         }
 
@@ -751,7 +866,7 @@ class Parser {
         }
     
         if (methodConfig == null) {
-            Flow.error.report("Unknown Math method: " + methodName);
+            Flow.error.report("Unknown Math method: " + methodName, peek().lineNumber);
             return null;
         }
     
@@ -785,12 +900,30 @@ class Parser {
         }
     }
 
+    private function parseNewExpression():Expression {
+        var classNameToken:Token = consume(TokenType.IDENTIFIER, "Expected class name after 'new'");
+        var className:String = classNameToken.value;
+    
+        consume(TokenType.LPAREN, "Expected '(' after class name");
+        var arguments:Array<Expression> = [];
+        while (!check(TokenType.RPAREN)) {
+            arguments.push(parseExpression());
+            if (match([TokenType.COMMA])) {
+                // Consume comma
+            }
+        }
+        consume(TokenType.RPAREN, "Expected ')' after arguments");
+        return new NewExpression(className, arguments);
+    }
+
     private function parseExpression():Expression {
         var firstTokenType:TokenType = peek().type;
         if (firstTokenType == TokenType.KEYWORD) {
             var keyword:String = advance().value;
             if (keyword == "func") {
                 return parseFunctionLiteral();
+            } else if (keyword == "new") {
+                return parseNewExpression();
             }
         } else if (firstTokenType == TokenType.LBRACKET) {
             return parseArrayLiteral();
@@ -853,6 +986,10 @@ class Parser {
     private function parseFactor():Expression {
         if (match([TokenType.NOT])) {
             return parseLogicalNot();
+        } else if (match([TokenType.PLUS_PLUS, TokenType.MINUS_MINUS])) {
+            var opera: String = previous().value;
+            var operand: Expression = parseFactor();
+            return new UnaryExpression(opera, operand, true);
         } else if (match([TokenType.NUMBER])) {
             var value:String = previous().value;
             if (value.indexOf(".") != -1) {
@@ -887,13 +1024,19 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')'");
             return parseMathExpression();
         } else if (match([TokenType.IDENTIFIER])) {
+            var expr: Expression = null;
             if (peek().type == TokenType.LPAREN) {
-                return parseCallExpression();
+                expr = parseCallExpression();
             } else if (peek().type == TokenType.LBRACKET) {
-                return parseArrayAccess();
+                expr = parseArrayAccess();
             } else {
-                return parsePropertyAccess();
+                expr = parsePropertyAccess();
             }
+            if (match([TokenType.PLUS_PLUS, TokenType.MINUS_MINUS])) {
+                var opera: String = previous().value;
+                return new UnaryExpression(opera, expr, false);
+            }
+            return expr;
         } else if (match([TokenType.TRUE])) {
             return new LiteralExpression(true);
         } else if (match([TokenType.FALSE])) {
@@ -903,7 +1046,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return expr;
         } else {
-            Flow.error.report("Unexpected token: " + peek().value);
+            Flow.error.report("Unexpected token: " + peek().value, peek().lineNumber);
             return null;
         }
     }
@@ -952,7 +1095,7 @@ class Parser {
 
     private function parseLogicalNot():Expression {
         var expr = parseLogicalAnd();
-        return new UnaryExpression("not", expr);
+        return new UnaryExpression("not", expr, true);
     }
 
     private function parseIOExpression():Expression {
@@ -979,7 +1122,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new IOExpression("writeByte", [expression]);
         } else {
-            Flow.error.report("Unknown IO method: " + methodName);
+            Flow.error.report("Unknown IO method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -991,27 +1134,27 @@ class Parser {
         if (methodName == ".nextInt") {
             var lparenToken:Token = advance();
             if (lparenToken.type != TokenType.LPAREN) {
-                Flow.error.report("Expected '(' after 'nextInt'");
+                Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
                 return null;
             }
 
             var minExpr:Expression = parseExpression();
             var commaToken:Token = advance();
             if (commaToken.type != TokenType.COMMA) {
-                Flow.error.report("Expected ',' after min value");
+                Flow.error.report("Expected ',' after min value", peek().lineNumber);
                 return null;
             }
 
             var maxExpr:Expression = parseExpression();
             var rparenToken:Token = advance();
             if (rparenToken.type != TokenType.RPAREN) {
-                Flow.error.report("Expected ')' after max value");
+                Flow.error.report("Expected ')' after max value", peek().lineNumber);
                 return null;
             }
 
             return new RandomExpression(methodName, [minExpr, maxExpr]);
         } else {
-            Flow.error.report("Unknown Random method: " + methodName);
+            Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -1053,7 +1196,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new SystemExpression("openUrl", [expression]);
         } else {
-            Flow.error.report("Unknown System method: " + methodName);
+            Flow.error.report("Unknown System method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -1080,7 +1223,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after file path expression");
             return new FileExpression("exists", [filePath]);
         } else {
-            Flow.error.report("Unknown File method: " + methodName);
+            Flow.error.report("Unknown File method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -1105,7 +1248,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new JsonExpression("isValid", [expression]);
         } else {
-            Flow.error.report("Unknown Json method: " + methodName);
+            Flow.error.report("Unknown Json method: " + methodName, peek().lineNumber);
             return null;
         }
     }
@@ -1138,7 +1281,7 @@ class Parser {
         }
     
         if (methodConfig == null) {
-            Flow.error.report("Unknown Math method: " + methodName);
+            Flow.error.report("Unknown Math method: " + methodName, peek().lineNumber);
             return null;
         }
     
@@ -1339,7 +1482,7 @@ class Parser {
             var methodName: String = parts.join(".");
 
             consume(TokenType.LPAREN, "Expected '(' after method name");
-
+    
             while (!check(TokenType.RPAREN)) {
                 arguments.push(parseExpression());
                 if (match([TokenType.COMMA])) {
@@ -1430,7 +1573,7 @@ class Parser {
 
     private function consume(tokenType:TokenType, message:String):Token {
         if (!check(tokenType)) {
-            Flow.error.report(message);
+            Flow.error.report(message, peek().lineNumber);
         }
         return advance();
     }

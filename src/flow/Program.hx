@@ -59,15 +59,17 @@ class LetStatement extends Statement {
     public var name: String;
     public var opera: String;
     public var initializer: Expression;
+    public var isPrefix: Bool;
 
-    public function new(name: String, opera: String, initializer: Expression) {
+    public function new(name: String, opera: String, initializer: Expression = null, isPrefix: Bool = false) {
         this.name = name;
         this.opera = opera;
         this.initializer = initializer;
+        this.isPrefix = isPrefix;
     }
 
     public override function execute(): Void {
-        var value: Dynamic = initializer.evaluate();
+        var value: Dynamic = initializer != null ? initializer.evaluate() : null;
 
         switch (opera) {
             case "=":
@@ -75,24 +77,56 @@ class LetStatement extends Statement {
             case "+=":
                 var existingValue: Dynamic = Environment.get(name);
                 if (Std.is(existingValue, Int) || Std.is(existingValue, Float)) {
-                    var existingFloat: Float = cast(existingValue, Float);
-                    var newValue: Float = existingFloat + cast(value, Float);
+                    var newValue: Float = cast(existingValue, Float) + cast(value, Float);
+                    Environment.define(name, newValue);
+                } else if (Std.is(existingValue, String)) {
+                    var existingString: String = cast(existingValue, String);
+                    var newValue: String = existingString + cast(value, String);
                     Environment.define(name, newValue);
                 } else if (existingValue == null) {
-                    Environment.define(name, cast(value, Float));
+                    Environment.define(name, cast(value, String));
                 } else {
-                    Flow.error.report("Variable '" + name + "' is not a number for '+=' operation");
+                    Flow.error.report("Variable '" + name + "' is not suitable for '+=' operation");
                 }
             case "-=":
                 var existingValue: Dynamic = Environment.get(name);
                 if (Std.is(existingValue, Int) || Std.is(existingValue, Float)) {
-                    var existingFloat: Float = cast(existingValue, Float);
-                    var newValue: Float = existingFloat - cast(value, Float);
+                    var newValue: Float = cast(existingValue, Float) - cast(value, Float);
+                    Environment.define(name, newValue);
+                } else if (Std.is(existingValue, String)) {
+                    var existingString: String = cast(existingValue, String);
+                    var newValue: String = existingString.split(cast(value, String)).join("");
                     Environment.define(name, newValue);
                 } else if (existingValue == null) {
-                    Environment.define(name, -cast(value, Float));
+                    Flow.error.report("Variable '" + name + "' is null or not a string for '-=' operation");
                 } else {
-                    Flow.error.report("Variable '" + name + "' is not a number for '-=' operation");
+                    Flow.error.report("Variable '" + name + "' is not suitable for '-=' operation");
+                }
+            case "++":
+                var existingValue: Dynamic = Environment.get(name);
+                if (Std.is(existingValue, Int) || Std.is(existingValue, Float)) {
+                    var incrementValue: Float = isPrefix ? 1 : 0;
+                    var newValue: Float = cast(existingValue, Float) + incrementValue;
+                    Environment.define(name, newValue);
+                    if (!isPrefix) {
+                        newValue += 1;
+                        Environment.define(name, newValue);
+                    }
+                } else {
+                    Flow.error.report("Variable '" + name + "' is not suitable for '++' operation");
+                }
+            case "--":
+                var existingValue: Dynamic = Environment.get(name);
+                if (Std.is(existingValue, Int) || Std.is(existingValue, Float)) {
+                    var decrementValue: Float = isPrefix ? 1 : 0;
+                    var newValue: Float = cast(existingValue, Float) - decrementValue;
+                    Environment.define(name, newValue);
+                    if (!isPrefix) {
+                        newValue -= 1;
+                        Environment.define(name, newValue);
+                    }
+                } else {
+                    Flow.error.report("Variable '" + name + "' is not suitable for '--' operation");
                 }
             default:
                 Flow.error.report("Unsupported assignment operator: " + opera);
@@ -179,7 +213,7 @@ class Environment {
                     Flow.error.report("Undefined property: " + part);
                     return null;
                 }
-    
+
                 if (Reflect.hasField(obj, part)) {
                     obj = Reflect.field(obj, part);
                 } else {
@@ -187,7 +221,7 @@ class Environment {
                     return null;
                 }
             }
-    
+
             var func: Dynamic = Reflect.field(obj, methodName);
             if (func == null || !(func is Function)) {
                 Flow.error.report("Undefined method: " + methodName);
@@ -249,9 +283,21 @@ class Environment {
 class Scope {
     public var letStatements:Array<LetStatement> = new Array();
     public var parentScope:Scope;
+    public var context:Dynamic;
 
-    public function new(parentScope:Scope = null) {
+    public function new(parentScope:Scope = null, context:Dynamic = null) {
         this.parentScope = parentScope;
+        this.context = context;
+    }
+
+    public function getContext():Dynamic {
+        if (context != null) {
+            return context;
+        } else if (parentScope != null) {
+            return parentScope.getContext();
+        } else {
+            return null;
+        }
     }
 }
 
@@ -904,15 +950,51 @@ class ArrayAssignmentStatement extends Statement {
 class UnaryExpression extends Expression {
     public var opera:String;
     public var right:Expression;
+    public var isPrefix:Bool;
 
-    public function new(opera:String, right:Expression) {
+    public function new(opera:String, right:Expression, isPrefix:Bool) {
         this.opera = opera;
         this.right = right;
+        this.isPrefix = isPrefix;
     }
 
     public override function evaluate():Dynamic {
         var value = right.evaluate();
+        var variableName:String = null;
+
+        if (Std.is(right, VariableExpression)) {
+            var variableExpr = cast right;
+            variableName = variableExpr.name;
+        } else {
+            Flow.error.report("Unary operator '" + opera + "' can only be applied to variables.");
+            return null;
+        }
+
+        var currentValue = Environment.get(variableName);
+
         switch (opera) {
+            case "++":
+                if (isPrefix) {
+                    currentValue += 1;
+                    Environment.define(variableName, currentValue);
+                    return currentValue;
+                } else {
+                    var oldValue = currentValue;
+                    currentValue += 1;
+                    Environment.define(variableName, currentValue);
+                    return oldValue;
+                }
+            case "--":
+                if (isPrefix) {
+                    currentValue -= 1;
+                    Environment.define(variableName, currentValue);
+                    return currentValue;
+                } else {
+                    var oldValue = currentValue;
+                    currentValue -= 1;
+                    Environment.define(variableName, currentValue);
+                    return oldValue;
+                }
             case "not":
                 if (Std.is(value, Bool)) {
                     return !cast(value);
@@ -1069,6 +1151,184 @@ class CatchClause {
     }
 }
 
+class EnumStatement extends Statement {
+    public var name:String;
+    public var values:Array<EnumValue>;
+
+    public function new(name:String, values:Array<EnumValue>) {
+        this.name = name;
+        this.values = values;
+    }
+
+    public override function execute():Void {
+        var enumObject:Dynamic = {};
+        for (value in values) {
+            Reflect.setField(enumObject, value.name, value.value.evaluate());
+        }
+        Environment.define(name, enumObject);
+    }
+}
+
+class EnumValue {
+    public var name:String;
+    public var value:Expression;
+
+    public function new(name:String, value:Expression) {
+        this.name = name;
+        this.value = value;
+    }
+}
+
+class ClassStatement extends Statement {
+    public var name:String;
+    public var properties:Array<Statement>;
+    public var methods:Array<Statement>;
+    public var constructor:Statement;
+
+    public function new(name:String, properties:Array<Statement>, methods:Array<Statement>, constructor:Statement) {
+        this.name = name;
+        this.properties = properties;
+        this.methods = methods;
+        this.constructor = constructor;
+    }
+
+    public override function execute():Void {
+        var classObj:Dynamic = {};
+
+        for (property in properties) {
+            property.execute();
+            var letProperty:LetStatement = cast property;
+            var propertyName:String = letProperty.name;
+            var propertyValue:Dynamic = Environment.get(propertyName);
+            Reflect.setField(classObj, propertyName, propertyValue);
+        }
+
+        for (method in methods) {
+            method.execute();
+            var funcMethod:FuncStatement = cast method;
+            var methodName:String = funcMethod.name;
+            var methodFunc:Function = Environment.getFunction(methodName);
+            Reflect.setField(classObj, methodName, methodFunc);
+        }
+
+        if (constructor != null) {
+            var constructorFunc = function(instance:Dynamic, args:Array<Dynamic>):Void {
+                for (i in 0...args.length) {
+                    Environment.define(cast(constructor, FuncStatement).parameters[i].name, args[i]);
+                }
+                cast(constructor, FuncStatement).execute();
+            };
+            Reflect.setField(classObj, "constructor", constructorFunc);
+        }
+
+        Environment.define(name, classObj);
+    }
+}
+
+class NewStatement extends Statement {
+    public var className:String;
+    public var arguments:Array<Expression>;
+
+    public function new(className:String, arguments:Array<Expression>) {
+        this.className = className;
+        this.arguments = arguments;
+    }
+
+    public override function execute():Void {
+        var classObj:Dynamic = Environment.get(className);
+        if (classObj == null) {
+            Flow.error.report("Undefined class: " + className);
+            return;
+        }
+    
+        var instance:Dynamic = {};
+
+        var args:Array<Dynamic> = [];
+        for (arg in arguments) {
+            args.push(arg.evaluate());
+        }
+
+        var constructorFunc:Dynamic = Reflect.field(classObj, "constructor");
+        if (constructorFunc != null) {
+            constructorFunc(instance, args);
+        }
+
+        for (field in Reflect.fields(classObj)) {
+            if (field != "constructor") {
+                Reflect.setField(instance, field, Reflect.field(classObj, field));
+            }
+        }
+
+        Environment.define("this", instance);
+    }
+}
+
+class NewExpression extends Expression {
+    public var className:String;
+    public var arguments:Array<Expression>;
+
+    public function new(className:String, arguments:Array<Expression>) {
+        this.className = className;
+        this.arguments = arguments;
+    }
+
+    public override function evaluate():Dynamic {
+        var classObj:Dynamic = Environment.get(className);
+        if (classObj == null) {
+            Flow.error.report("Undefined class: " + className);
+            return null;
+        }
+    
+        var instance:Dynamic = {};
+
+        var args:Array<Dynamic> = [];
+        for (arg in arguments) {
+            args.push(arg.evaluate());
+        }
+
+        var constructorFunc:Dynamic = Reflect.field(classObj, "constructor");
+        if (constructorFunc != null) {
+            constructorFunc(instance, args);
+        }
+
+        for (field in Reflect.fields(classObj)) {
+            if (field != "constructor") {
+                Reflect.setField(instance, field, Reflect.field(classObj, field));
+            }
+        }
+
+        return instance;
+    }
+}
+
+class DoWhileStatement extends Statement {
+    public var condition:Expression;
+    public var body:Statement;
+
+    public function new(condition:Expression, body:Statement) {
+        this.condition = condition;
+        this.body = body;
+    }
+
+    public override function execute():Void {
+        do {
+            body.execute();
+        } while (condition.evaluate());
+    }
+}
+
+class ThisStatement extends Statement {
+    public var expression:Expression;
+
+    public function new(expression:Expression) {
+        this.expression = expression;
+    }
+
+    public override function execute():Void {
+        Environment.define("this", expression.evaluate());
+    }
+}
+
 class ChrFunctionCall extends Expression {
     public var argument: Expression;
 
@@ -1077,7 +1337,20 @@ class ChrFunctionCall extends Expression {
     }
 
     public override function evaluate(): Dynamic {
-        var code = Std.int(argument.evaluate());
+        var codeValue = argument.evaluate();
+
+        if (!Std.is(codeValue, Int)) {
+            Flow.error.report("Invalid type for character code.");
+            return "";
+        }
+
+        var code = Std.int(codeValue);
+
+        if (code < 0 || code > 1114111) {
+            Flow.error.report("Character code out of range: " + code);
+            return "";
+        }
+
         return String.fromCharCode(code);
     }
 }
@@ -1129,11 +1402,15 @@ class CharAtFunctionCall extends Expression {
         var strValue = stringExpr.evaluate();
         var indexValue = indexExpr.evaluate();
 
-        var index = Std.int(indexValue);
+        if (!(strValue is String)) {
+            Flow.error.report("Invalid type for string.");
+            return "";
+        }
+
         var str = cast(strValue, String);
+        var index = Std.int(Std.parseFloat(indexValue));
 
         if (index < 0 || index >= str.length) {
-            Flow.error.report("Index out of bounds: " + index);
             return "";
         }
 
@@ -1142,21 +1419,31 @@ class CharAtFunctionCall extends Expression {
 }
 
 class CharCodeAtFunctionCall extends Expression {
-    public var stringExpr:Expression;
-    public var indexExpr:Expression;
+    public var stringExpr: Expression;
+    public var indexExpr: Expression;
 
-    public function new(stringExpr:Expression, indexExpr:Expression) {
+    public function new(stringExpr: Expression, indexExpr: Expression) {
         this.stringExpr = stringExpr;
         this.indexExpr = indexExpr;
     }
 
-    public override function evaluate():Dynamic {
-        var str = stringExpr.evaluate();
-        var index = indexExpr.evaluate();
-        if (Std.is(str, String) && Std.is(index, Int)) {
-            return str.charCodeAt(index);
+    public override function evaluate(): Dynamic {
+        var strValue = stringExpr.evaluate();
+        var indexValue = indexExpr.evaluate();
+
+        if (!(strValue is String)) {
+            Flow.error.report("Invalid type for string.");
+            return null;
         }
-        return null;
+
+        var str = cast(strValue, String);
+        var index = Std.int(Std.parseFloat(indexValue));
+
+        if (index < 0 || index >= str.length) {
+            return 0;
+        }
+
+        return str.charCodeAt(index);
     }
 }
 
