@@ -200,6 +200,8 @@ class Lexer {
                 return new Token(TokenType.JSON, token, lineNumber);
             case "Math":
                 return new Token(TokenType.MATH, token, lineNumber);
+            case "Http":
+                return new Token(TokenType.HTTP, token, lineNumber);
             case "and":
                 return new Token(TokenType.AND, token, lineNumber);
             case "or":
@@ -208,8 +210,6 @@ class Lexer {
                 return new Token(TokenType.NOT, token, lineNumber);
             case "new":
                 return new Token(TokenType.KEYWORD, token, lineNumber);
-            case "this":
-                return new Token(TokenType.THIS, token, lineNumber);
             case "%":
                 return new Token(TokenType.MODULO, token, lineNumber);
             case "<<":
@@ -379,6 +379,7 @@ enum TokenType {
     FILE;
     JSON;
     MATH;
+    HTTP;
     DEFAULT;
     CASE;
     NOT;
@@ -386,5 +387,4 @@ enum TokenType {
     MINUS_EQUAL;
     PLUS_PLUS;
     MINUS_MINUS;
-    THIS;
 }

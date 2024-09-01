@@ -79,8 +79,8 @@ class Parser {
             return parseJsonStatement();
         } else if (firstTokenType == TokenType.MATH) {
             return parseMathStatement();
-        } else if (firstTokenType == TokenType.THIS) {
-            return parseThisStatement();
+        } else if (firstTokenType == TokenType.HTTP) {
+            return parseHttpStatement();
         } else if (firstTokenType == TokenType.IDENTIFIER) {
             if (peekNext().type == TokenType.LBRACKET) {
                 return parseArrayAssignment();
@@ -102,12 +102,17 @@ class Parser {
         var nameToken: Token = consume(TokenType.IDENTIFIER, "Expected variable name after 'let'");
         var name: String = nameToken.value;
 
+        while (match([TokenType.DOT])) {
+            var propertyToken: Token = consume(TokenType.IDENTIFIER, "Expected property name after '.'");
+            name += "." + propertyToken.value;
+        }
+
         var opera: String = "";
 
         if (match([TokenType.EQUAL, TokenType.PLUS_EQUAL, TokenType.MINUS_EQUAL, TokenType.PLUS_PLUS, TokenType.MINUS_MINUS])) {
             opera = previous().value;
         } else {
-            Flow.error.report("Expected '=', '+=', '-=', '++', or '--' after variable name", peek().lineNumber);
+            Flow.error.report("Expected '=', '+=', '-=', '++', or '--' after variable name or property access", peek().lineNumber);
             return null;
         }
 
@@ -214,11 +219,6 @@ class Parser {
         var body:BlockStatement = parseBlock();
 
         return new FunctionLiteralExpression(parameters, body);
-    }
-
-    function parseThisStatement():ThisStatement {
-        var expression = parseExpression();
-        return new ThisStatement(expression);
     }
 
     private function parseArrayAssignment():Statement {
@@ -340,7 +340,9 @@ class Parser {
             return parseGetStatement();
         } else if (name == "sort") {
             return parseSortStatement();
-        }        
+        } else if (name == "splice") {
+            return parseSpliceStatement();
+        }
         var isMethodCall: Bool = name.indexOf(".") > -1;
         if (isMethodCall) {
             var parts: Array<String> = name.split(".");
@@ -580,6 +582,17 @@ class Parser {
         return new SortStatement(arrayExpr);
     }
 
+    private function parseSpliceStatement(): Statement {
+        consume(TokenType.LPAREN, "Expected '(' after 'splice'");
+        var arrayExpr: Expression = parseExpression();
+        consume(TokenType.COMMA, "Expected ',' after array argument in 'splice'");
+        var startIndexExpr: Expression = parseExpression();
+        consume(TokenType.COMMA, "Expected ',' after start index in 'splice'");
+        var deleteCountExpr: Expression = parseExpression();
+        consume(TokenType.RPAREN, "Expected ')' after arguments in 'splice'");
+        return new SpliceStatement(arrayExpr, startIndexExpr, deleteCountExpr);
+    }
+
     private function parseIOStatement():Statement {
         var ioToken:Token = advance();
         if (ioToken.type != TokenType.IO) {
@@ -652,22 +665,32 @@ class Parser {
                 Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
                 return null;
             }
-
             var minExpr:Expression = parseExpression();
             var commaToken:Token = advance();
             if (commaToken.type != TokenType.COMMA) {
                 Flow.error.report("Expected ',' after min value", peek().lineNumber);
                 return null;
             }
-
             var maxExpr:Expression = parseExpression();
             var rparenToken:Token = advance();
             if (rparenToken.type != TokenType.RPAREN) {
                 Flow.error.report("Expected ')' after max value", peek().lineNumber);
                 return null;
             }
-
             return new RandomStatement(methodName, [minExpr, maxExpr]);
+        } else if (methodName == ".choice") {
+            var lparenToken:Token = advance();
+            if (lparenToken.type != TokenType.LPAREN) {
+                Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
+                return null;
+            }
+            var listExpr:Expression = parseExpression();
+            var rparenToken:Token = advance();
+            if (rparenToken.type != TokenType.RPAREN) {
+                Flow.error.report("Expected ')' after list", peek().lineNumber);
+                return null;
+            }
+            return new RandomStatement(methodName, [listExpr]);
         } else {
             Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
             return null;
@@ -728,6 +751,10 @@ class Parser {
             var expression:Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new SystemStatement("openUrl", [expression]);
+        } else if (methodName == ".args") {
+            consume(TokenType.LPAREN, "Expected '(' after 'exit'");
+            consume(TokenType.RPAREN, "Expected ')' after 'exit'");
+            return new SystemStatement("args");
         } else {
             Flow.error.report("Unknown System method: " + methodName, peek().lineNumber);
             return null;
@@ -756,26 +783,78 @@ class Parser {
         var methodNameToken:Token = advance();
         var methodName:String = methodNameToken.value;
 
-        if (methodName == ".readFile") {
-            consume(TokenType.LPAREN, "Expected '(' after 'readFile'");
-            var filePath:Expression = parseExpression();
-            consume(TokenType.RPAREN, "Expected ')' after file path expression");
-            return new FileStatement("readFile", [filePath]);
-        } else if (methodName == ".writeFile") {
-            consume(TokenType.LPAREN, "Expected '(' after 'writeFile'");
-            var filePath:Expression = parseExpression();
-            consume(TokenType.COMMA, "Expected ',' after file path expression");
-            var content:Expression = parseExpression();
-            consume(TokenType.RPAREN, "Expected ')' after content expression");
-            return new FileStatement("writeFile", [filePath, content]);
-        } else if (methodName == ".exists") {
-            consume(TokenType.LPAREN, "Expected '(' after 'exists'");
-            var filePath:Expression = parseExpression();
-            consume(TokenType.RPAREN, "Expected ')' after file path expression");
-            return new FileStatement("exists", [filePath]);
-        } else {
-            Flow.error.report("Unknown File method: " + methodName, peek().lineNumber);
-            return null;
+        switch (methodName) {
+            case ".readFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'readFile'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileStatement("readFile", [filePath]);
+            case ".writeFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'writeFile'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after file path expression");
+                var content:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after content expression");
+                return new FileStatement("writeFile", [filePath, content]);
+            case ".exists":
+                consume(TokenType.LPAREN, "Expected '(' after 'exists'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileStatement("exists", [filePath]);
+            case ".appendToFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'appendToFile'");
+                var appendFilePath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after file path expression");
+                var appendContent:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after content expression");
+                return new FileStatement("appendToFile", [appendFilePath, appendContent]);
+            case ".deleteFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'deleteFile'");
+                var deleteFilePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileStatement("deleteFile", [deleteFilePath]);
+            case ".copyFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'copyFile'");
+                var sourcePath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after source path expression");
+                var destinationPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after destination path expression");
+                return new FileStatement("copyFile", [sourcePath, destinationPath]);
+            case ".renameFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'renameFile'");
+                var oldPath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after old path expression");
+                var newPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after new path expression");
+                return new FileStatement("renameFile", [oldPath, newPath]);
+            case ".readLines":
+                consume(TokenType.LPAREN, "Expected '(' after 'readLines'");
+                var linesFilePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileStatement("readLines", [linesFilePath]);
+            case ".getFileSize":
+                consume(TokenType.LPAREN, "Expected '(' after 'getFileSize'");
+                var fileSizePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileStatement("getFileSize", [fileSizePath]);
+            case ".listFilesInDirectory":
+                consume(TokenType.LPAREN, "Expected '(' after 'listFilesInDirectory'");
+                var directoryPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after directory path expression");
+                return new FileStatement("listFilesInDirectory", [directoryPath]);
+            case ".createDirectory":
+                consume(TokenType.LPAREN, "Expected '(' after 'createDirectory'");
+                var directoryPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after directory path expression");
+                return new FileStatement("createDirectory", [directoryPath]);
+            case ".getFileExtension":
+                consume(TokenType.LPAREN, "Expected '(' after 'getFileExtension'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileStatement("getFileExtension", [filePath]);
+            default:
+                Flow.error.report("Unknown File method: " + methodName, peek().lineNumber);
+                return null;
         }
     }
 
@@ -854,7 +933,9 @@ class Parser {
             { name: ".tan", args: 1 },
             { name: ".asin", args: 1 },
             { name: ".acos", args: 1 },
-            { name: ".atan", args: 1 }
+            { name: ".atan", args: 1 },
+            { name: ".floor", args: 1 },
+            { name: ".random", args: 0 }
         ];
 
         var methodConfig = null;
@@ -884,6 +965,41 @@ class Parser {
         consume(TokenType.RPAREN, "Expected ')' after arguments");
     
         return new MathStatement(methodName.substr(1), arguments);
+    }
+
+    private function parseHttpStatement():Statement {
+        var httpToken:Token = advance();
+        if (httpToken.type != TokenType.HTTP) {
+            Flow.error.report("Expected 'HTTP' keyword", peek().lineNumber);
+            return null;
+        }
+        var lparenToken:Token = advance();
+        if (lparenToken.type != TokenType.LPAREN) {
+            Flow.error.report("Expected '('", peek().lineNumber);
+            return null;
+        }
+        var rparenToken:Token = advance();
+        if (rparenToken.type != TokenType.RPAREN) {
+            Flow.error.report("Expected ')'", peek().lineNumber);
+            return null;
+        }
+        var methodNameToken:Token = advance();
+        var methodName:String = methodNameToken.value;
+
+        if (methodName == ".get") {
+            consume(TokenType.LPAREN, "Expected '(' after 'get'");
+            var urlExpression:Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after expression(s)");
+            return new HttpStatement("get", urlExpression);
+        } else if (methodName == ".post") {
+            consume(TokenType.LPAREN, "Expected '(' after 'get'");
+            var urlExpression:Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after expression(s)");
+            return new HttpStatement("post", urlExpression);
+        } else {
+            Flow.error.report("Unknown HTTP method: " + methodName, peek().lineNumber);
+            return null;
+        }
     }
 
     private function parseBlock(): BlockStatement {
@@ -1023,6 +1139,10 @@ class Parser {
             consume(TokenType.LPAREN, "Expected '('");
             consume(TokenType.RPAREN, "Expected ')'");
             return parseMathExpression();
+        } else if (match([TokenType.HTTP])) {
+            consume(TokenType.LPAREN, "Expected '('");
+            consume(TokenType.RPAREN, "Expected ')'");
+            return parseHttpExpression();
         } else if (match([TokenType.IDENTIFIER])) {
             var expr: Expression = null;
             if (peek().type == TokenType.LPAREN) {
@@ -1137,22 +1257,32 @@ class Parser {
                 Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
                 return null;
             }
-
             var minExpr:Expression = parseExpression();
             var commaToken:Token = advance();
             if (commaToken.type != TokenType.COMMA) {
                 Flow.error.report("Expected ',' after min value", peek().lineNumber);
                 return null;
             }
-
             var maxExpr:Expression = parseExpression();
             var rparenToken:Token = advance();
             if (rparenToken.type != TokenType.RPAREN) {
                 Flow.error.report("Expected ')' after max value", peek().lineNumber);
                 return null;
             }
-
             return new RandomExpression(methodName, [minExpr, maxExpr]);
+        } else if (methodName == ".choice") {
+            var lparenToken:Token = advance();
+            if (lparenToken.type != TokenType.LPAREN) {
+                Flow.error.report("Expected '(' after 'choice'", peek().lineNumber);
+                return null;
+            }
+            var listExpr:Expression = parseExpression();
+            var rparenToken:Token = advance();
+            if (rparenToken.type != TokenType.RPAREN) {
+                Flow.error.report("Expected ')' after list", peek().lineNumber);
+                return null;
+            }
+            return new RandomExpression(methodName, [listExpr]);
         } else {
             Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
             return null;
@@ -1195,6 +1325,10 @@ class Parser {
             var expression:Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after expression");
             return new SystemExpression("openUrl", [expression]);
+        } else if (methodName == ".args") {
+            consume(TokenType.LPAREN, "Expected '(' after 'exit'");
+            consume(TokenType.RPAREN, "Expected ')' after 'exit'");
+            return new SystemExpression("args");
         } else {
             Flow.error.report("Unknown System method: " + methodName, peek().lineNumber);
             return null;
@@ -1204,27 +1338,79 @@ class Parser {
     private function parseFileExpression():Expression {
         var methodNameToken:Token = advance();
         var methodName:String = methodNameToken.value;
-
-        if (methodName == ".readFile") {
-            consume(TokenType.LPAREN, "Expected '(' after 'readFile'");
-            var filePath:Expression = parseExpression();
-            consume(TokenType.RPAREN, "Expected ')' after file path expression");
-            return new FileExpression("readFile", [filePath]);
-        } else if (methodName == ".writeFile") {
-            consume(TokenType.LPAREN, "Expected '(' after 'writeFile'");
-            var filePath:Expression = parseExpression();
-            consume(TokenType.COMMA, "Expected ',' after file path expression");
-            var content:Expression = parseExpression();
-            consume(TokenType.RPAREN, "Expected ')' after content expression");
-            return new FileExpression("writeFile", [filePath, content]);
-        } else if (methodName == ".exists") {
-            consume(TokenType.LPAREN, "Expected '(' after 'exists'");
-            var filePath:Expression = parseExpression();
-            consume(TokenType.RPAREN, "Expected ')' after file path expression");
-            return new FileExpression("exists", [filePath]);
-        } else {
-            Flow.error.report("Unknown File method: " + methodName, peek().lineNumber);
-            return null;
+    
+        switch (methodName) {
+            case ".readFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'readFile'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileExpression("readFile", [filePath]);
+            case ".writeFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'writeFile'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after file path expression");
+                var content:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after content expression");
+                return new FileExpression("writeFile", [filePath, content]);
+            case ".exists":
+                consume(TokenType.LPAREN, "Expected '(' after 'exists'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileExpression("exists", [filePath]);
+            case ".appendToFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'appendToFile'");
+                var appendFilePath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after file path expression");
+                var appendContent:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after content expression");
+                return new FileExpression("appendToFile", [appendFilePath, appendContent]);
+            case ".deleteFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'deleteFile'");
+                var deleteFilePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileExpression("deleteFile", [deleteFilePath]);
+            case ".copyFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'copyFile'");
+                var sourcePath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after source path expression");
+                var destinationPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after destination path expression");
+                return new FileExpression("copyFile", [sourcePath, destinationPath]);
+            case ".renameFile":
+                consume(TokenType.LPAREN, "Expected '(' after 'renameFile'");
+                var oldPath:Expression = parseExpression();
+                consume(TokenType.COMMA, "Expected ',' after old path expression");
+                var newPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after new path expression");
+                return new FileExpression("renameFile", [oldPath, newPath]);
+            case ".readLines":
+                consume(TokenType.LPAREN, "Expected '(' after 'readLines'");
+                var linesFilePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileExpression("readLines", [linesFilePath]);
+            case ".getFileSize":
+                consume(TokenType.LPAREN, "Expected '(' after 'getFileSize'");
+                var fileSizePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileExpression("getFileSize", [fileSizePath]);
+            case ".listFilesInDirectory":
+                consume(TokenType.LPAREN, "Expected '(' after 'listFilesInDirectory'");
+                var directoryPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after directory path expression");
+                return new FileExpression("listFilesInDirectory", [directoryPath]);
+            case ".createDirectory":
+                consume(TokenType.LPAREN, "Expected '(' after 'createDirectory'");
+                var directoryPath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after directory path expression");
+                return new FileExpression("createDirectory", [directoryPath]);
+            case ".getFileExtension":
+                consume(TokenType.LPAREN, "Expected '(' after 'getFileExtension'");
+                var filePath:Expression = parseExpression();
+                consume(TokenType.RPAREN, "Expected ')' after file path expression");
+                return new FileExpression("getFileExtension", [filePath]);
+            default:
+                Flow.error.report("Unknown File method: " + methodName, peek().lineNumber);
+                return null;
         }
     }
 
@@ -1269,7 +1455,9 @@ class Parser {
             { name: ".tan", args: 1 },
             { name: ".asin", args: 1 },
             { name: ".acos", args: 1 },
-            { name: ".atan", args: 1 }
+            { name: ".atan", args: 1 },
+            { name: ".floor", args: 1 },
+            { name: ".random", args: 0 }
         ];
 
         var methodConfig = null;
@@ -1299,6 +1487,26 @@ class Parser {
         consume(TokenType.RPAREN, "Expected ')' after arguments");
     
         return new MathExpression(methodName.substr(1), arguments);
+    }
+
+    private function parseHttpExpression():Expression {
+        var methodNameToken:Token = advance();
+        var methodName:String = methodNameToken.value;
+
+        if (methodName == ".get") {
+            consume(TokenType.LPAREN, "Expected '(' after 'get'");
+            var urlExpression:Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after expression(s)");
+            return new HttpExpression("get", urlExpression);
+        } else if (methodName == ".post") {
+            consume(TokenType.LPAREN, "Expected '(' after 'get'");
+            var urlExpression:Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after expression(s)");
+            return new HttpExpression("post", urlExpression);
+        } else {
+            Flow.error.report("Unknown HTTP method: " + methodName, peek().lineNumber);
+            return null;
+        }
     }
 
     private function parseCallExpression():Expression {
@@ -1473,6 +1681,26 @@ class Parser {
             var arrayExpr: Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after array argument in 'sort'");
             return new SortFunctionCall(arrayExpr);
+        } else if (name == "capitalize") {
+            consume(TokenType.LPAREN, "Expected '(' after 'capitalize'");
+            var argument: Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after argument");
+            return new CapitalizeFunctionCall(argument);
+        } else if (name == "reverse") {
+            consume(TokenType.LPAREN, "Expected '(' after 'reverse'");
+            var argument: Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after argument");
+            return new ReverseFunctionCall(argument);
+        } else if (name == "isDigit") {
+            consume(TokenType.LPAREN, "Expected '(' after 'isDigit'");
+            var argument: Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after argument");
+            return new IsDigitFunctionCall(argument);
+        } else if (name == "isNumeric") {
+            consume(TokenType.LPAREN, "Expected '(' after 'isNumeric'");
+            var argument: Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after argument");
+            return new IsNumericFunctionCall(argument);
         }
 
         var isMethodCall: Bool = name.indexOf(".") > -1;
