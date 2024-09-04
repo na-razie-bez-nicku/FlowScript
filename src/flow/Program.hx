@@ -461,21 +461,38 @@ class BinaryExpression extends Expression {
     }
 
     public override function evaluate():Dynamic {
-        var leftValue = left.evaluate();
-        var rightValue = right.evaluate();
+        var leftValue:Dynamic = left.evaluate();
+        var rightValue:Dynamic = right.evaluate();
 
-        var leftIsFloat = Std.is(leftValue, Float);
-        var rightIsFloat = Std.is(rightValue, Float);
-        var leftIsString = Std.is(leftValue, String);
-        var rightIsString = Std.is(rightValue, String);
+        var leftIsFloat:Bool = Std.is(leftValue, Float);
+        var rightIsFloat:Bool = Std.is(rightValue, Float);
+        var leftIsString:Bool = Std.is(leftValue, String);
+        var rightIsString:Bool = Std.is(rightValue, String);
+        var leftIsBool:Bool = Std.is(leftValue, Bool);
+        var rightIsBool:Bool = Std.is(rightValue, Bool);
 
-        if (!leftIsFloat &&!leftIsString) {
-            Flow.error.report("Unsupported left operand type for operator: " + opera);
-            return null;
-        }
-        if (!rightIsFloat &&!rightIsString) {
-            Flow.error.report("Unsupported right operand type for operator: " + opera);
-            return null;
+        if (opera == "and" || opera == "or") {
+            if (!leftIsBool) {
+                Flow.error.report("Unsupported left operand type for 'and'/'or': " + Type.typeof(leftValue));
+                return null;
+            }
+            if (!rightIsBool) {
+                Flow.error.report("Unsupported right operand type for 'and'/'or': " + Type.typeof(rightValue));
+                return null;
+            }
+
+            var leftBool:Bool = cast(leftValue, Bool);
+            var rightBool:Bool = cast(rightValue, Bool);
+
+            switch (opera) {
+                case "and":
+                    return leftBool && rightBool;
+                case "or":
+                    return leftBool || rightBool;
+                default:
+                    Flow.error.report("Unknown logical operator: " + opera);
+                    return null;
+            }
         }
 
         if (leftIsFloat) leftValue = cast(leftValue, Float);
@@ -490,21 +507,21 @@ class BinaryExpression extends Expression {
                 }
             case "-":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '-' for strings");
                     return null;
                 } else {
                     return leftValue - rightValue;
                 }
             case "*":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '*' for strings");
                     return null;
                 } else {
                     return leftValue * rightValue;
                 }
             case "/":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '/' for strings");
                     return null;
                 } else if (rightValue == 0) {
                     Flow.error.report("Division by zero error");
@@ -514,7 +531,7 @@ class BinaryExpression extends Expression {
                 }
             case "%":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '%' for strings");
                     return null;
                 } else if (rightValue == 0) {
                     Flow.error.report("Modulo by zero error");
@@ -525,52 +542,60 @@ class BinaryExpression extends Expression {
             case "==":
                 return leftValue == rightValue;
             case "!=":
-                return leftValue!= rightValue;
+                return leftValue != rightValue;
             case "<":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '<' for strings");
                     return null;
                 } else {
                     return leftValue < rightValue;
                 }
             case "<=":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '<=' for strings");
                     return null;
                 } else {
                     return leftValue <= rightValue;
                 }
             case ">":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '>' for strings");
                     return null;
                 } else {
                     return leftValue > rightValue;
                 }
             case ">=":
                 if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator for strings: " + opera);
+                    Flow.error.report("Unsupported operator '>=' for strings");
                     return null;
                 } else {
                     return leftValue >= rightValue;
                 }
-            case "and":
-                if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator 'and' for strings");
-                    return null;
-                } else {
-                    return (leftValue!= 0) && (rightValue!= 0);
-                }
-            case "or":
-                if (leftIsString || rightIsString) {
-                    Flow.error.report("Unsupported operator 'or' for strings");
-                    return null;
-                } else {
-                    return (leftValue!= 0) || (rightValue!= 0);
-                }
             default:
                 Flow.error.report("Unknown operator: " + opera);
                 return null;
+        }
+    }
+}
+
+class TernaryExpression extends Expression {
+    public var condition:Expression;
+    public var trueBranch:Expression;
+    public var falseBranch:Expression;
+
+    public function new(condition:Expression, trueBranch:Expression, falseBranch:Expression) {
+        this.condition = condition;
+        this.trueBranch = trueBranch;
+        this.falseBranch = falseBranch;
+    }
+
+    public override function evaluate():Dynamic {
+        var conditionValue = condition.evaluate();
+        if (Std.is(conditionValue, Bool)) {
+            return cast(conditionValue, Bool) ? trueBranch.evaluate() : falseBranch.evaluate();
+        } else {
+            Flow.error.report("Condition in ternary operator must evaluate to a Boolean");
+            return null;
         }
     }
 }
@@ -1039,6 +1064,10 @@ class ArrayAccessExpression extends Expression {
             return null;
         }
 
+        if (indexValue < 0) {
+            indexValue += arrayValue.length;
+        }
+
         if (indexValue < 0 || indexValue >= arrayValue.length) {
             Flow.error.report("Index out of bounds: " + indexValue);
             return null;
@@ -1067,6 +1096,11 @@ class ArrayAssignmentStatement extends Statement {
         }
 
         var indexValue:Int = index.evaluate();
+
+        if (indexValue < 0) {
+            indexValue += arrayValue.length;
+        }
+
         if (indexValue < 0 || indexValue >= arrayValue.length) {
             Flow.error.report("Index out of bounds: " + indexValue);
             return;
@@ -1091,6 +1125,15 @@ class UnaryExpression extends Expression {
     public override function evaluate():Dynamic {
         var value = right.evaluate();
         var variableName:String = null;
+
+        if (opera == "-") {
+            if (Std.is(value, Int) || Std.is(value, Float)) {
+                return -Std.parseFloat(Std.string(value));
+            } else {
+                Flow.error.report("Unary minus operator can only be applied to numeric values.");
+                return null;
+            }
+        }
 
         if (Std.is(right, VariableExpression)) {
             var variableExpr = cast right;
@@ -2154,6 +2197,81 @@ class GetStatement extends Statement {
     }
 }
 
+class ExistsFunctionCall extends Expression {
+    public var targetExpr: Expression;
+    public var keyExpr: Expression;
+
+    public function new(targetExpr: Expression, keyExpr: Expression) {
+        this.targetExpr = targetExpr;
+        this.keyExpr = keyExpr;
+    }
+
+    public override function evaluate(): Bool {
+        var targetValue = targetExpr.evaluate();
+        var keyValue = keyExpr.evaluate();
+
+        switch (Type.typeof(targetValue)) {
+            case TClass(Array):
+                var arr = cast(targetValue, Array<Dynamic>);
+                if (Std.is(keyValue, Int)) {
+                    var index = cast(keyValue, Int);
+                    return index >= 0 && index < arr.length;
+                } else {
+                    var key = cast(keyValue, String);
+                    for (i in 0...arr.length) {
+                        if (arr[i][0] == key) {
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+            case TObject:
+                return Reflect.hasField(targetValue, cast(keyValue, String));
+            default:
+                Flow.error.report("Exists can only be applied to arrays or objects.");
+                return false;
+        }
+    }
+}
+
+class ExistsStatement extends Statement {
+    public var targetExpr: Expression;
+    public var keyExpr: Expression;
+    public var result: Bool;
+
+    public function new(targetExpr: Expression, keyExpr: Expression) {
+        this.targetExpr = targetExpr;
+        this.keyExpr = keyExpr;
+    }
+
+    public override function execute():Void {
+        var targetValue = targetExpr.evaluate();
+        var keyValue = keyExpr.evaluate();
+
+        switch (Type.typeof(targetValue)) {
+            case TClass(Array):
+                var arr = cast(targetValue, Array<Dynamic>);
+                if (Std.is(keyValue, Int)) {
+                    var index = cast(keyValue, Int);
+                    result = index >= 0 && index < arr.length;
+                } else {
+                    var key = cast(keyValue, String);
+                    result = false;
+                    for (i in 0...arr.length) {
+                        if (arr[i][0] == key) {
+                            result = true;
+                            break;
+                        }
+                    }
+                }
+            case TObject:
+                result = Reflect.hasField(targetValue, cast(keyValue, String));
+            default:
+                Flow.error.report("Exists can only be applied to arrays or objects.");
+        }
+    }
+}
+
 class SortFunctionCall extends Expression {
     public var arrayExpr: Expression;
 
@@ -2782,6 +2900,12 @@ class MathExpression extends Expression {
                 if (evaluatedArguments.length == 1) return Math.atan(evaluatedArguments[0]);
             case "floor":
                 if (evaluatedArguments.length == 1) return Math.floor(evaluatedArguments[0]);
+            case "round":
+                if (evaluatedArguments.length == 1) return Math.round(evaluatedArguments[0]);
+            case "ceil":
+                if (evaluatedArguments.length == 1) return Math.ceil(evaluatedArguments[0]);
+            case "trunc":
+                if (evaluatedArguments.length == 1) return Math.trunc(evaluatedArguments[0]);
             case "random":
                 return Math.random();
             default:
@@ -2835,6 +2959,12 @@ class MathStatement extends Statement {
                 if (evaluatedArguments.length == 1) Math.atan(evaluatedArguments[0]);
             case "floor":
                 if (evaluatedArguments.length == 1) Math.floor(evaluatedArguments[0]);
+            case "round":
+                if (evaluatedArguments.length == 1) Math.round(evaluatedArguments[0]);
+            case "ceil":
+                if (evaluatedArguments.length == 1) Math.ceil(evaluatedArguments[0]);
+            case "trunc":
+                if (evaluatedArguments.length == 1) Math.trunc(evaluatedArguments[0]);
             case "random":
                 Math.random();
             default:

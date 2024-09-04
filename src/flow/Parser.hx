@@ -338,6 +338,8 @@ class Parser {
             return parseSetStatement();
         } else if (name == "get") {
             return parseGetStatement();
+        } else if (name == "exists") {
+            return parseExistsStatement();
         } else if (name == "sort") {
             return parseSortStatement();
         } else if (name == "splice") {
@@ -573,6 +575,15 @@ class Parser {
         var keyExpr: Expression = parseExpression();
         consume(TokenType.RPAREN, "Expected ')' after key expression in 'get'");
         return new GetStatement(targetExpr, keyExpr);
+    }
+
+    private function parseExistsStatement(): Statement {
+        consume(TokenType.LPAREN, "Expected '(' after 'exists'");
+        var targetExpr: Expression = parseExpression();
+        consume(TokenType.COMMA, "Expected ',' after target expression in 'exists'");
+        var keyExpr: Expression = parseExpression();
+        consume(TokenType.RPAREN, "Expected ')' after key expression in 'exists'");
+        return new ExistsStatement(targetExpr, keyExpr);
     }
 
     private function parseSortStatement(): Statement {
@@ -935,6 +946,9 @@ class Parser {
             { name: ".acos", args: 1 },
             { name: ".atan", args: 1 },
             { name: ".floor", args: 1 },
+            { name: ".round", args: 1 },
+            { name: ".ceil", args: 1 },
+            { name: ".trunc", args: 1 },
             { name: ".random", args: 0 }
         ];
 
@@ -1046,7 +1060,18 @@ class Parser {
         } else if (firstTokenType == TokenType.LBRACE) {
             return parseObjectLiteral();
         }
-        return parseLogicalOr();
+        return parseTernaryExpression();
+    }
+
+    private function parseTernaryExpression():Expression {
+        var expr = parseLogicalOr();
+        if (match([TokenType.QUESTION])) {
+            var trueBranch = parseExpression();
+            consume(TokenType.COLON, "Expected ':' after '?'");
+            var falseBranch = parseExpression();
+            return new TernaryExpression(expr, trueBranch, falseBranch);
+        }
+        return expr;
     }
 
     private function parseLogicalOr():Expression {
@@ -1102,6 +1127,8 @@ class Parser {
     private function parseFactor():Expression {
         if (match([TokenType.NOT])) {
             return parseLogicalNot();
+        } else if (match([TokenType.MINUS])) {
+            return parseUnaryMinus();
         } else if (match([TokenType.PLUS_PLUS, TokenType.MINUS_MINUS])) {
             var opera: String = previous().value;
             var operand: Expression = parseFactor();
@@ -1195,7 +1222,11 @@ class Parser {
                 }
 
                 if (i < value.length && value.charAt(i) == '}') {
-                    parts.push(new VariableExpression(varName));
+                    if (varName.length > 0) {
+                        parts.push(new VariableExpression(varName));
+                    } else {
+                        parts.push(new LiteralExpression("{}"));
+                    }
                 }
 
                 currentPart = "";
@@ -1216,6 +1247,11 @@ class Parser {
     private function parseLogicalNot():Expression {
         var expr = parseLogicalAnd();
         return new UnaryExpression("not", expr, true);
+    }
+
+    private function parseUnaryMinus():Expression {
+        var expr = parseExpression();
+        return new UnaryExpression("-", expr, true);
     }
 
     private function parseIOExpression():Expression {
@@ -1457,6 +1493,9 @@ class Parser {
             { name: ".acos", args: 1 },
             { name: ".atan", args: 1 },
             { name: ".floor", args: 1 },
+            { name: ".round", args: 1 },
+            { name: ".ceil", args: 1 },
+            { name: ".trunc", args: 1 },
             { name: ".random", args: 0 }
         ];
 
@@ -1676,6 +1715,13 @@ class Parser {
             var keyExpr: Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after key expression in 'get'");
             return new GetFunctionCall(targetExpr, keyExpr);
+        } else if (name == "exists") {
+            consume(TokenType.LPAREN, "Expected '(' after 'exists'");
+            var targetExpr: Expression = parseExpression();
+            consume(TokenType.COMMA, "Expected ',' after target expression in 'exists'");
+            var keyExpr: Expression = parseExpression();
+            consume(TokenType.RPAREN, "Expected ')' after key expression in 'exists'");
+            return new ExistsFunctionCall(targetExpr, keyExpr);
         } else if (name == "sort") {
             consume(TokenType.LPAREN, "Expected '(' after 'sort'");
             var arrayExpr: Expression = parseExpression();
