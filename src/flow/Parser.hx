@@ -670,41 +670,112 @@ class Parser {
         var methodNameToken:Token = advance();
         var methodName:String = methodNameToken.value;
 
-        if (methodName == ".nextInt") {
-            var lparenToken:Token = advance();
-            if (lparenToken.type != TokenType.LPAREN) {
-                Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
+        switch (methodName) {
+            case ".nextInt":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var minExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after min value", peek().lineNumber);
+                    return null;
+                }
+                var maxExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after max value", peek().lineNumber);
+                    return null;
+                }
+                return new RandomStatement(methodName, [minExpr, maxExpr]);
+            case ".choice":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after list", peek().lineNumber);
+                    return null;
+                }
+                return new RandomStatement(methodName, [listExpr]);
+            case ".weightedChoice":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after list", peek().lineNumber);
+                    return null;
+                }
+                var weightsExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after weights", peek().lineNumber);
+                    return null;
+                }
+                return new RandomStatement(methodName, [listExpr, weightsExpr]);
+            case ".shuffle":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after list", peek().lineNumber);
+                    return null;
+                }
+                return new RandomStatement(methodName, [listExpr]);
+            case ".sample":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after list", peek().lineNumber);
+                    return null;
+                }
+                var nExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after sample size", peek().lineNumber);
+                    return null;
+                }
+                return new RandomStatement(methodName, [listExpr, nExpr]);
+            case ".gaussian":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var meanExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after mean", peek().lineNumber);
+                    return null;
+                }
+                var stddevExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after standard deviation", peek().lineNumber);
+                    return null;
+                }
+                return new RandomStatement(methodName, [meanExpr, stddevExpr]);
+            default:
+                Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
                 return null;
-            }
-            var minExpr:Expression = parseExpression();
-            var commaToken:Token = advance();
-            if (commaToken.type != TokenType.COMMA) {
-                Flow.error.report("Expected ',' after min value", peek().lineNumber);
-                return null;
-            }
-            var maxExpr:Expression = parseExpression();
-            var rparenToken:Token = advance();
-            if (rparenToken.type != TokenType.RPAREN) {
-                Flow.error.report("Expected ')' after max value", peek().lineNumber);
-                return null;
-            }
-            return new RandomStatement(methodName, [minExpr, maxExpr]);
-        } else if (methodName == ".choice") {
-            var lparenToken:Token = advance();
-            if (lparenToken.type != TokenType.LPAREN) {
-                Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
-                return null;
-            }
-            var listExpr:Expression = parseExpression();
-            var rparenToken:Token = advance();
-            if (rparenToken.type != TokenType.RPAREN) {
-                Flow.error.report("Expected ')' after list", peek().lineNumber);
-                return null;
-            }
-            return new RandomStatement(methodName, [listExpr]);
-        } else {
-            Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
-            return null;
         }
     }
 
@@ -1006,7 +1077,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression(s)");
             return new HttpStatement("get", urlExpression);
         } else if (methodName == ".post") {
-            consume(TokenType.LPAREN, "Expected '(' after 'get'");
+            consume(TokenType.LPAREN, "Expected '(' after 'post'");
             var urlExpression:Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after expression(s)");
             return new HttpStatement("post", urlExpression);
@@ -1287,41 +1358,112 @@ class Parser {
         var methodNameToken:Token = advance();
         var methodName:String = methodNameToken.value;
 
-        if (methodName == ".nextInt") {
-            var lparenToken:Token = advance();
-            if (lparenToken.type != TokenType.LPAREN) {
-                Flow.error.report("Expected '(' after 'nextInt'", peek().lineNumber);
+        switch (methodName) {
+            case ".nextInt":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var minExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after min value", peek().lineNumber);
+                    return null;
+                }
+                var maxExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after max value", peek().lineNumber);
+                    return null;
+                }
+                return new RandomExpression(methodName, [minExpr, maxExpr]);
+            case ".choice":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after list", peek().lineNumber);
+                    return null;
+                }
+                return new RandomExpression(methodName, [listExpr]);
+            case ".weightedChoice":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after list", peek().lineNumber);
+                    return null;
+                }
+                var weightsExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after weights", peek().lineNumber);
+                    return null;
+                }
+                return new RandomExpression(methodName, [listExpr, weightsExpr]);
+            case ".shuffle":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after list", peek().lineNumber);
+                    return null;
+                }
+                return new RandomExpression(methodName, [listExpr]);
+            case ".sample":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var listExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after list", peek().lineNumber);
+                    return null;
+                }
+                var nExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after sample size", peek().lineNumber);
+                    return null;
+                }
+                return new RandomExpression(methodName, [listExpr, nExpr]);
+            case ".gaussian":
+                var lparenToken:Token = advance();
+                if (lparenToken.type != TokenType.LPAREN) {
+                    Flow.error.report("Expected '(' after method name", peek().lineNumber);
+                    return null;
+                }
+                var meanExpr:Expression = parseExpression();
+                var commaToken:Token = advance();
+                if (commaToken.type != TokenType.COMMA) {
+                    Flow.error.report("Expected ',' after mean", peek().lineNumber);
+                    return null;
+                }
+                var stddevExpr:Expression = parseExpression();
+                var rparenToken:Token = advance();
+                if (rparenToken.type != TokenType.RPAREN) {
+                    Flow.error.report("Expected ')' after standard deviation", peek().lineNumber);
+                    return null;
+                }
+                return new RandomExpression(methodName, [meanExpr, stddevExpr]);
+            default:
+                Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
                 return null;
-            }
-            var minExpr:Expression = parseExpression();
-            var commaToken:Token = advance();
-            if (commaToken.type != TokenType.COMMA) {
-                Flow.error.report("Expected ',' after min value", peek().lineNumber);
-                return null;
-            }
-            var maxExpr:Expression = parseExpression();
-            var rparenToken:Token = advance();
-            if (rparenToken.type != TokenType.RPAREN) {
-                Flow.error.report("Expected ')' after max value", peek().lineNumber);
-                return null;
-            }
-            return new RandomExpression(methodName, [minExpr, maxExpr]);
-        } else if (methodName == ".choice") {
-            var lparenToken:Token = advance();
-            if (lparenToken.type != TokenType.LPAREN) {
-                Flow.error.report("Expected '(' after 'choice'", peek().lineNumber);
-                return null;
-            }
-            var listExpr:Expression = parseExpression();
-            var rparenToken:Token = advance();
-            if (rparenToken.type != TokenType.RPAREN) {
-                Flow.error.report("Expected ')' after list", peek().lineNumber);
-                return null;
-            }
-            return new RandomExpression(methodName, [listExpr]);
-        } else {
-            Flow.error.report("Unknown Random method: " + methodName, peek().lineNumber);
-            return null;
         }
     }
 
@@ -1538,7 +1680,7 @@ class Parser {
             consume(TokenType.RPAREN, "Expected ')' after expression(s)");
             return new HttpExpression("get", urlExpression);
         } else if (methodName == ".post") {
-            consume(TokenType.LPAREN, "Expected '(' after 'get'");
+            consume(TokenType.LPAREN, "Expected '(' after 'post'");
             var urlExpression:Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after expression(s)");
             return new HttpExpression("post", urlExpression);
@@ -1747,6 +1889,17 @@ class Parser {
             var argument: Expression = parseExpression();
             consume(TokenType.RPAREN, "Expected ')' after argument");
             return new IsNumericFunctionCall(argument);
+        } else if (name == "center") {
+            consume(TokenType.LPAREN, "Expected '(' after 'center'");
+            var argument: Expression = parseExpression();
+            consume(TokenType.COMMA, "Expected ',' after argument");
+            var width: Expression = parseExpression();
+            var fillChar: Expression = null;
+            if (match([TokenType.COMMA])) {
+                fillChar = parseExpression();
+            }
+            consume(TokenType.RPAREN, "Expected ')' after arguments");
+            return new CenterFunctionCall(argument, width, fillChar);
         }
 
         var isMethodCall: Bool = name.indexOf(".") > -1;
